@@ -1,0 +1,54 @@
+{
+  "name": "ItemCarrinho",
+  "type": "object",
+  "properties": {
+    "cliente_email": {
+      "type": "string",
+      "description": "Email do cliente (identificador do carrinho)"
+    },
+    "item_tipo": {
+      "type": "string",
+      "enum": [
+        "produto",
+        "servico"
+      ],
+      "description": "Tipo do item"
+    },
+    "item_id": {
+      "type": "string",
+      "description": "ID do produto ou servi\u00e7o"
+    },
+    "item_nome": {
+      "type": "string",
+      "description": "Nome do item"
+    },
+    "item_preco": {
+      "type": "number",
+      "description": "Pre\u00e7o unit\u00e1rio"
+    },
+    "quantidade": {
+      "type": "number",
+      "default": 1,
+      "description": "Quantidade do item"
+    },
+    "produto_tipo": {
+      "type": "string",
+      "enum": [
+        "fisico",
+        "digital"
+      ],
+      "description": "Tipo do produto (se aplic\u00e1vel)"
+    },
+    "produto_arquivo_pdf_url": {
+      "type": "string",
+      "description": "URL do PDF (para produtos digitais)"
+    }
+  },
+  "required": [
+    "cliente_email",
+    "item_tipo",
+    "item_id",
+    "item_nome",
+    "item_preco"
+  ]
+}

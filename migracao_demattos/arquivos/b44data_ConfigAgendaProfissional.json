@@ -1,0 +1,23 @@
+[
+  {
+    "horario_inicio": "09:00",
+    "horario_fim": "19:00",
+    "profissional_id": "695020387cb8f35ab22528ca",
+    "horario_almoco_fim": "14:00",
+    "intervalo_minutos": 30,
+    "horario_almoco_inicio": "12:00",
+    "dias_semana": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "id": "695d9c145e9a4eec06a54c2e",
+    "created_date": "2026-01-06T23:34:44.403000",
+    "updated_date": "2026-08-18T20:06:01.415000",
+    "created_by_id": "6952ef72784c5be3c6290e2c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  }
+]

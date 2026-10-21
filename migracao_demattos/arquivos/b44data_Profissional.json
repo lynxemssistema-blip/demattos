@@ -1,0 +1,39 @@
+[
+  {
+    "historico_profissional": "Luan de Mattos | Barbeiro Visagista\n13 anos transformando rostos com técnica, visagismo e educação na barbearia",
+    "telefone": "31 97365-1924",
+    "foto_url": "https://base44.app/api/apps/694fc9a4353fcf7bf1d594ed/files/public/694fc9a4353fcf7bf1d594ed/b8a29f9e7__DSC6681.jpg",
+    "tem_acesso_admin": true,
+    "ativo": true,
+    "destaque_home": true,
+    "senha_acesso": "203540Lu@",
+    "nome": "Luan",
+    "servicos_ids": [
+      "6952b9c4128cab896d6c0e9e",
+      "6950b4b0267ce9c7484893c8",
+      "6950b4842750d802a8142762",
+      "6950b46ac5f3fa728d9f0b33",
+      "6950b44aa3249cdd726e52fb",
+      "6950b4208bf3e24480dced87",
+      "6950b35422599272794c21b3",
+      "6950b2b8cbf5b7ba81d339b0",
+      "6950b2909b399bb13994cad7",
+      "6950b19eb841ae5200edeb1f",
+      "6950b08bedf4adbae0f29232",
+      "6950afcf9f2355d1a7826026",
+      "6950af94ebf724754932c2ff",
+      "6950aecd0ad31cebe1eae28a",
+      "6950ae4a08a89c8af1bdfb17",
+      "6950ad9ff93049641aa85b96",
+      "6950ad5d0ad31cebe1eae049",
+      "6950ac85254b4615df15496f"
+    ],
+    "email": "luandemattos102030@gmail.com",
+    "id": "695020387cb8f35ab22528ca",
+    "created_date": "2025-12-27T18:06:48.436000",
+    "updated_date": "2026-08-18T20:06:01.170000",
+    "created_by_id": "694fc9a4353fcf7bf1d594ee",
+    "created_by": "edsonmanoel2012@gmail.com",
+    "is_sample": false
+  }
+]

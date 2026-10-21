@@ -1,0 +1,85 @@
+{
+  "name": "Agendamento",
+  "type": "object",
+  "properties": {
+    "cliente_nome": {
+      "type": "string",
+      "description": "Nome do cliente"
+    },
+    "cliente_telefone": {
+      "type": "string",
+      "description": "Telefone do cliente"
+    },
+    "profissional_id": {
+      "type": "string",
+      "description": "ID do profissional"
+    },
+    "profissional_nome": {
+      "type": "string",
+      "description": "Nome do profissional"
+    },
+    "servico": {
+      "type": "string",
+      "description": "Servi\u00e7o solicitado"
+    },
+    "data": {
+      "type": "string",
+      "format": "date",
+      "description": "Data do agendamento"
+    },
+    "horario": {
+      "type": "string",
+      "description": "Hor\u00e1rio de in\u00edcio do agendamento"
+    },
+    "horario_fim": {
+      "type": "string",
+      "description": "Hor\u00e1rio de fim do agendamento"
+    },
+    "duracao_total": {
+      "type": "number",
+      "description": "Dura\u00e7\u00e3o total em minutos"
+    },
+    "observacoes": {
+      "type": "string",
+      "description": "Observa\u00e7\u00f5es do agendamento"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pendente",
+        "confirmado",
+        "realizado",
+        "cancelado"
+      ],
+      "default": "pendente",
+      "description": "Status do agendamento"
+    },
+    "agendamento_recorrente_id": {
+      "type": "string",
+      "description": "ID que agrupa agendamentos da mesma s\u00e9rie recorrente"
+    },
+    "eh_recorrente": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se este agendamento faz parte de uma s\u00e9rie recorrente"
+    },
+    "possivel_atraso": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o agendamento pode ter pequenos atrasos devido \u00e0 dura\u00e7\u00e3o dos servi\u00e7os ou slots dispon\u00edveis"
+    },
+    "confirmado_automaticamente": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o agendamento foi confirmado automaticamente pelo sistema"
+    }
+  },
+  "required": [
+    "cliente_nome",
+    "cliente_telefone",
+    "profissional_id",
+    "servico",
+    "data",
+    "horario"
+  ]
+}

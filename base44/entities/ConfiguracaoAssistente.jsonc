@@ -1,0 +1,56 @@
+{
+  "name": "ConfiguracaoAssistente",
+  "type": "object",
+  "properties": {
+    "voz_tipo": {
+      "type": "string",
+      "enum": [
+        "pt-BR-Female",
+        "pt-BR-Male",
+        "pt-PT-Female",
+        "pt-PT-Male"
+      ],
+      "default": "pt-BR-Female",
+      "description": "Tipo de voz do assistente"
+    },
+    "velocidade_fala": {
+      "type": "number",
+      "default": 1.2,
+      "minimum": 0.5,
+      "maximum": 2.0,
+      "description": "Velocidade da fala (0.5 a 2.0)"
+    },
+    "tom_voz": {
+      "type": "number",
+      "default": 1.1,
+      "minimum": 0.5,
+      "maximum": 2.0,
+      "description": "Tom da voz (0.5 a 2.0)"
+    },
+    "volume": {
+      "type": "number",
+      "default": 1.0,
+      "minimum": 0.1,
+      "maximum": 1.0,
+      "description": "Volume da voz (0.1 a 1.0)"
+    },
+    "audio_respostas_ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se o assistente fala as respostas em \u00e1udio"
+    },
+    "audio_entrada_ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se permite entrada de \u00e1udio por voz"
+    },
+    "ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se est\u00e1 ativo"
+    }
+  },
+  "required": [
+    "voz_tipo"
+  ]
+}

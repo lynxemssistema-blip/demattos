@@ -1,0 +1,9 @@
+{
+  "short_name": "DeMattos",
+  "name": "Barbearia DeMattos",
+  "icons": [],
+  "start_url": "/",
+  "background_color": "#0a0a0a",
+  "theme_color": "#D4AF37",
+  "display": "standalone"
+}

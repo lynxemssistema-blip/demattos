@@ -1,0 +1,101 @@
+[
+  {
+    "chave": "telefone_gestor",
+    "valor": "(31) 97365-1924",
+    "descricao": "WhatsApp da automação/gestor",
+    "id": "6a850f14debec91139803164",
+    "created_date": "2026-08-19T02:04:04.576000",
+    "updated_date": "2026-08-19T02:04:04.576000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "confirmacao_automatica_agendamento",
+    "valor": "true",
+    "descricao": "Se os agendamentos são confirmados automaticamente",
+    "id": "6a850f1494b742c0895cae3e",
+    "created_date": "2026-08-19T02:04:04.561000",
+    "updated_date": "2026-08-19T02:04:04.561000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "instagram_secao_ativa",
+    "valor": "true",
+    "descricao": "Se a seção de vídeos do Instagram está ativa",
+    "id": "6a850f14795edd40a3d6eb4e",
+    "created_date": "2026-08-19T02:04:04.555000",
+    "updated_date": "2026-08-19T02:04:04.555000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "horario_semana",
+    "valor": "09:00 as 19:00",
+    "descricao": "Horário de funcionamento (Seg-Sex)",
+    "id": "6a850f14c836b261583d90fb",
+    "created_date": "2026-08-19T02:04:04.530000",
+    "updated_date": "2026-08-19T02:04:04.530000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "telefone",
+    "valor": "(31) 97365-1924",
+    "descricao": "Telefone/WhatsApp de contato",
+    "id": "6a850f14351970ee7d6350d5",
+    "created_date": "2026-08-19T02:04:04.524000",
+    "updated_date": "2026-08-19T02:04:04.524000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "horario_sabado",
+    "valor": "09:00as 17:00",
+    "descricao": "Horário de funcionamento (Sábado)",
+    "id": "6a850f14da8e191efeeb566b",
+    "created_date": "2026-08-19T02:04:04.521000",
+    "updated_date": "2026-08-19T02:04:04.521000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "email_suporte_tecnico",
+    "valor": "edsonmanoel2012@gmail.com",
+    "descricao": "Email para receber notificações de erros e eventos críticos do sistema",
+    "id": "6a850f14a505ed1238f7b3ba",
+    "created_date": "2026-08-19T02:04:04.189000",
+    "updated_date": "2026-08-19T02:04:04.189000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "endereco",
+    "valor": "R. Rio Tocantins, 328 - Riacho das Pedras, Contagem - MG, 32280-170",
+    "descricao": "Endereço da barbearia",
+    "id": "6a850f14edb62675d86528cc",
+    "created_date": "2026-08-19T02:04:04.167000",
+    "updated_date": "2026-08-19T02:04:04.167000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  },
+  {
+    "chave": "horario_domingo",
+    "valor": "",
+    "descricao": "Horário de funcionamento (Domingo)",
+    "id": "6a850f14ad15955d1e79e2af",
+    "created_date": "2026-08-19T02:04:04.156000",
+    "updated_date": "2026-08-19T02:04:04.156000",
+    "created_by_id": "696f80a9b5ae1af868cc105c",
+    "created_by": "luandemattos102030@gmail.com",
+    "is_sample": false
+  }
+]

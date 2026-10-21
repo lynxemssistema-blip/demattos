@@ -1,0 +1,51 @@
+{
+  "name": "ConfigAgendaProfissional",
+  "type": "object",
+  "properties": {
+    "profissional_id": {
+      "type": "string",
+      "description": "ID do profissional"
+    },
+    "dias_semana": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Dias da semana que trabalha (0=Dom, 1=Seg, ..., 6=Sab)",
+      "default": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    "horario_inicio": {
+      "type": "string",
+      "default": "09:00",
+      "description": "Hor\u00e1rio de in\u00edcio do expediente"
+    },
+    "horario_fim": {
+      "type": "string",
+      "default": "18:00",
+      "description": "Hor\u00e1rio de fim do expediente"
+    },
+    "horario_almoco_inicio": {
+      "type": "string",
+      "description": "Hor\u00e1rio de in\u00edcio do almo\u00e7o/intervalo"
+    },
+    "horario_almoco_fim": {
+      "type": "string",
+      "description": "Hor\u00e1rio de fim do almo\u00e7o/intervalo"
+    },
+    "intervalo_minutos": {
+      "type": "number",
+      "default": 30,
+      "description": "Intervalo entre hor\u00e1rios (em minutos)"
+    }
+  },
+  "required": [
+    "profissional_id"
+  ]
+}

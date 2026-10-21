@@ -1,0 +1,15 @@
+{
+  "name": "ConfiguracoesRastreamento",
+  "type": "object",
+  "properties": {
+    "facebook_pixel_id": {
+      "type": "string",
+      "description": "ID do Facebook Pixel (ex: 123456789012345)"
+    },
+    "google_tag_manager_id": {
+      "type": "string",
+      "description": "ID do Google Tag Manager (ex: GTM-XXXXXXX)"
+    }
+  },
+  "required": []
+}

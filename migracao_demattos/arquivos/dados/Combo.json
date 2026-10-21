@@ -1,0 +1,22 @@
+[
+  {
+    "preco": 41.99,
+    "ativo": true,
+    "instagram_url": "",
+    "stripe_product_id": "prod_U6suB55L0yuD8s",
+    "produtos_ids": [
+      "695cfb48d66297a8f016ccdd",
+      "695c9823ce4da35891b52856"
+    ],
+    "nome": "Guia completo  + Manual de Barba e ociulos",
+    "imagem_url": "https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/694fc9a4353fcf7bf1d594ed/62c18ad8c_generated_image.png",
+    "descricao": "Antes de você dizer uma palavra, seu rosto já tomou uma decisão por você.\n\nA maioria dos homens passa anos se vestindo bem, investindo na carreira, construindo autoridade em outros campos, e ainda assim sente que algo na própria imagem não fecha. Uma imprecisão difícil de nomear. A barba que cresce sem direção. Os óculos escolhidos na pressa, sob a luz favorável de uma ótica, sem nenhum critério técnico real. O resultado é um rosto que não comunica quem o homem de fato é, que parece montado por acaso, não construído com intenção. E essa diferença, por menor que pareça, é percebida por todos ao redor, mesmo que ninguém a aponte.\n\nNão é falta de gosto. É falta de informação correta.\n\nÉ exatamente para resolver isso que este combo existe. Não como uma coleção de dicas soltas, mas como um sistema completo de conhecimento sobre o rosto masculino, do contorno da barba ao peso visual dos óculos, pensado para homens que levam a própria imagem a sério e não têm tempo a perder com achismo.\n\nNo Guia Completo Rosto e Óculos Masculino, você vai aprender a identificar com precisão o formato do seu rosto e entender como cada estrutura óssea responde a diferentes armações. Vai dominar a lógica da proporção, do peso visual e da escolha de materiais, saber quais modelos amplificam sua presença, quais criam harmonia e quais você deve eliminar sem hesitação, independentemente do que esteja na moda. Você vai parar de pedir opinião do vendedor e vai chegar na ótica sabendo exatamente o que quer e por quê aquilo funciona no seu rosto.\n\nNo Manual Completo de Barbas Masculinas, o conhecimento aprofunda. Você vai entender qual estilo de barba potencializa a sua estrutura facial, aprender as técnicas de contorno, delineamento e simetria que separam o refinado do amador, identificar os erros que destroem visuais que poderiam ser fortes e montar uma rotina real de cuidados, funcional, sem exageros, sem produtos errados para o seu tipo de pelo e pele. Nada de imitar o que você vê nas redes sociais. Conhecimento que é seu, aplicado ao seu rosto.\n\nJuntos, esses dois materiais formam algo que vai além de cada um individualmente. Eles criam uma leitura completa do rosto masculino, onde barba e óculos deixam de competir e passam a trabalhar em conjunto, construindo uma presença que é reconhecida antes de qualquer apresentação. Você vai olhar para o espelho com uma clareza diferente. Vai tomar decisões com a segurança de quem entende o que está fazendo. E as pessoas ao redor vão perceber uma coesão na sua imagem que não sabem explicar, mas não conseguem ignorar.\n\nEsse é o resultado concreto quando um homem para de improvisar e começa a agir com conhecimento.\n\nO combo está disponível agora. Adquira, aplique e deixe o seu rosto comunicar o que você realmente é.",
+    "stripe_price_id": "price_1T8f8OD32bB1q4CcB7zqUDGM",
+    "id": "69ad57b5c47061ce7aaf39f1",
+    "created_date": "2026-03-08T11:04:21.945000",
+    "updated_date": "2026-04-05T13:55:32.424000",
+    "created_by_id": "694fc9a4353fcf7bf1d594ee",
+    "created_by": "edsonmanoel2012@gmail.com",
+    "is_sample": false
+  }
+]

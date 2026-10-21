@@ -1,0 +1,30 @@
+[
+  {
+    "valor_total": 49.99,
+    "itens": [
+      {
+        "id": "694fcf3970f8c8bbe1462c9a",
+        "tipo": "produto",
+        "nome": "Visagismo/ detectando seu melhor estilo de Cabelo e Barba ",
+        "preco": 49.99,
+        "quantidade": 1,
+        "produto_tipo": "digital",
+        "arquivo_pdf_url": "https://base44.app/api/apps/694fc9a4353fcf7bf1d594ed/files/public/694fc9a4353fcf7bf1d594ed/925e631d4_VisagismodetectandoseumelhorestilodeCabeloeBarba-P23.pdf"
+      }
+    ],
+    "stripe_payment_intent_id": null,
+    "origem": "link_direto",
+    "recibo_url": null,
+    "cliente_id": null,
+    "stripe_session_id": "cs_live_a15vt0jMyvGm0T7TauyUe81bKvB1SUlE7BCcIxAJpNnvGth78uUmXyI2m8",
+    "cliente_email": "anaalice.adyas@gmail.com",
+    "status": "aberta",
+    "recibo_stripe": null,
+    "id": "69d1afa1aa3b4a05901f7942",
+    "created_date": "2026-04-05T00:41:05.985000",
+    "updated_date": "2026-04-05T00:41:05.985000",
+    "created_by_id": "service_a0807159-7710-4a3e-9aa2-e74b58d86009",
+    "created_by": "service+a0807159-7710-4a3e-9aa2-e74b58d86009@no-reply.base44.com",
+    "is_sample": false
+  }
+]

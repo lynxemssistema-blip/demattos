@@ -1,0 +1,47 @@
+[
+  {
+    "nome": "Plano Barbeiro",
+    "quantidade_tokens": 100,
+    "preco_reais": 75.9,
+    "stripe_price_id": "price_1StSXFD32bB1q4CcpKR3atz1",
+    "desconto_percentual": 0,
+    "destaque": false,
+    "ativo": true,
+    "id": "69760e0583e896ff897471dd",
+    "created_date": "2026-01-25T12:35:17.412000",
+    "updated_date": "2026-01-25T12:35:22.114000",
+    "created_by_id": "694fc9a4353fcf7bf1d594ee",
+    "created_by": "edsonmanoel2012@gmail.com",
+    "is_sample": false
+  },
+  {
+    "nome": "Plano Master",
+    "quantidade_tokens": 25,
+    "preco_reais": 49.9,
+    "stripe_price_id": "price_1StSXGD32bB1q4Cc6GG3SjUn",
+    "desconto_percentual": 0,
+    "destaque": false,
+    "ativo": true,
+    "id": "69760ded9baac5781398be23",
+    "created_date": "2026-01-25T12:34:53.173000",
+    "updated_date": "2026-01-25T12:35:22.622000",
+    "created_by_id": "694fc9a4353fcf7bf1d594ee",
+    "created_by": "edsonmanoel2012@gmail.com",
+    "is_sample": false
+  },
+  {
+    "nome": "Plano base Media de 10 fotos",
+    "quantidade_tokens": 10,
+    "preco_reais": 25.9,
+    "stripe_price_id": "price_1StSXGD32bB1q4CcMsEFYvN5",
+    "desconto_percentual": 0,
+    "destaque": true,
+    "ativo": true,
+    "id": "6955617c1f8e5bbd05c178cc",
+    "created_date": "2025-12-31T17:46:36.757000",
+    "updated_date": "2026-01-25T12:35:23.167000",
+    "created_by_id": "694fc9a4353fcf7bf1d594ee",
+    "created_by": "edsonmanoel2012@gmail.com",
+    "is_sample": false
+  }
+]

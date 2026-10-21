@@ -1,0 +1,50 @@
+[
+  {
+    "item_tipo": "produto",
+    "produto_tipo": "digital",
+    "item_id": "694fcf3970f8c8bbe1462c9a",
+    "item_nome": "Visagismo/ detectando seu melhor estilo de Cabelo e Barba ",
+    "item_preco": 49.99,
+    "quantidade": 5,
+    "cliente_email": "edsonmanoel2012@gmail.com",
+    "produto_arquivo_pdf_url": "https://base44.app/api/apps/694fc9a4353fcf7bf1d594ed/files/public/694fc9a4353fcf7bf1d594ed/925e631d4_VisagismodetectandoseumelhorestilodeCabeloeBarba-P23.pdf",
+    "id": "6aac4b557039b60b08ecf81f",
+    "created_date": "2026-09-17T20:19:33.896000",
+    "updated_date": "2026-09-17T20:19:33.896000",
+    "created_by_id": "service_a0807159-7710-4a3e-9aa2-e74b58d86009",
+    "created_by": "service+a0807159-7710-4a3e-9aa2-e74b58d86009@no-reply.base44.com",
+    "is_sample": false
+  },
+  {
+    "item_tipo": "produto",
+    "produto_tipo": "digital",
+    "item_id": "695c9823ce4da35891b52856",
+    "item_nome": "Manual Completo de Barbas Masculinas",
+    "item_preco": 19.99,
+    "quantidade": 6,
+    "cliente_email": "edsonmanoel2012@gmail.com",
+    "produto_arquivo_pdf_url": "https://base44.app/api/apps/694fc9a4353fcf7bf1d594ed/files/public/694fc9a4353fcf7bf1d594ed/3659f0ed7_ManualCompletodeBarbasMasculinas.pdf",
+    "id": "6aac4b558d49b4e070b2eff8",
+    "created_date": "2026-09-17T20:19:33.882000",
+    "updated_date": "2026-09-17T20:19:33.882000",
+    "created_by_id": "service_a0807159-7710-4a3e-9aa2-e74b58d86009",
+    "created_by": "service+a0807159-7710-4a3e-9aa2-e74b58d86009@no-reply.base44.com",
+    "is_sample": false
+  },
+  {
+    "item_tipo": "produto",
+    "produto_tipo": "digital",
+    "item_id": "695c9823ce4da35891b52856",
+    "item_nome": "Manual Completo de Barbas Masculinas",
+    "item_preco": 19.99,
+    "quantidade": 6,
+    "cliente_email": "edsonmanoel2012@gmail.com",
+    "produto_arquivo_pdf_url": "https://base44.app/api/apps/694fc9a4353fcf7bf1d594ed/files/public/694fc9a4353fcf7bf1d594ed/3659f0ed7_ManualCompletodeBarbasMasculinas.pdf",
+    "id": "6aac4b55c304aeac31758091",
+    "created_date": "2026-09-17T20:19:33.726000",
+    "updated_date": "2026-09-17T20:19:33.726000",
+    "created_by_id": "service_a0807159-7710-4a3e-9aa2-e74b58d86009",
+    "created_by": "service+a0807159-7710-4a3e-9aa2-e74b58d86009@no-reply.base44.com",
+    "is_sample": false
+  }
+]

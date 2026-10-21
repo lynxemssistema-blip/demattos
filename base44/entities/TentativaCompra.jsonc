@@ -1,0 +1,65 @@
+{
+  "name": "TentativaCompra",
+  "type": "object",
+  "properties": {
+    "stripe_session_id": {
+      "type": "string",
+      "description": "ID da sess\u00e3o Stripe"
+    },
+    "stripe_payment_intent_id": {
+      "type": "string",
+      "description": "ID do Payment Intent Stripe (preenchido ap\u00f3s confirma\u00e7\u00e3o)"
+    },
+    "cliente_email": {
+      "type": "string",
+      "description": "Email do cliente"
+    },
+    "cliente_id": {
+      "type": "string",
+      "description": "ID do cliente (se logado)"
+    },
+    "origem": {
+      "type": "string",
+      "enum": [
+        "link_direto",
+        "catalogo",
+        "creditos"
+      ],
+      "description": "De onde veio a compra"
+    },
+    "itens": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Itens que foram para checkout"
+    },
+    "valor_total": {
+      "type": "number",
+      "description": "Valor total da sess\u00e3o"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "aberta",
+        "confirmada",
+        "cancelada",
+        "expirada"
+      ],
+      "default": "aberta",
+      "description": "Status da tentativa"
+    },
+    "recibo_stripe": {
+      "type": "object",
+      "description": "Dados completos do recibo Stripe (PaymentIntent + charges)"
+    },
+    "recibo_url": {
+      "type": "string",
+      "description": "URL do recibo no Stripe"
+    }
+  },
+  "required": [
+    "stripe_session_id",
+    "cliente_email"
+  ]
+}

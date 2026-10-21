@@ -1,0 +1,57 @@
+{
+  "name": "Profissional",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome completo do profissional"
+    },
+    "email": {
+      "type": "string",
+      "description": "Email do profissional"
+    },
+    "telefone": {
+      "type": "string",
+      "description": "Telefone do profissional"
+    },
+    "foto_url": {
+      "type": "string",
+      "description": "Foto do profissional"
+    },
+    "historico_profissional": {
+      "type": "string",
+      "description": "Hist\u00f3rico e experi\u00eancia profissional"
+    },
+    "servicos_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "IDs dos servi\u00e7os que o profissional executa"
+    },
+    "senha_acesso": {
+      "type": "string",
+      "description": "Senha para acessar a agenda pessoal"
+    },
+    "tem_acesso_admin": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o profissional tem acesso \u00e0 p\u00e1gina admin"
+    },
+    "destaque_home": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se aparece na p\u00e1gina inicial"
+    },
+    "ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se o profissional est\u00e1 ativo"
+    }
+  },
+  "required": [
+    "nome",
+    "email",
+    "senha_acesso"
+  ]
+}

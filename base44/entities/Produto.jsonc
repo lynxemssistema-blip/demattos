@@ -1,0 +1,77 @@
+{
+  "name": "Produto",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome do produto"
+    },
+    "descricao": {
+      "type": "string",
+      "description": "Descri\u00e7\u00e3o do produto"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "fisico",
+        "digital"
+      ],
+      "default": "fisico",
+      "description": "Tipo do produto"
+    },
+    "preco": {
+      "type": "number",
+      "description": "Pre\u00e7o do produto"
+    },
+    "estoque": {
+      "type": "number",
+      "default": 0,
+      "description": "Quantidade em estoque (apenas para produtos f\u00edsicos)"
+    },
+    "imagem_url": {
+      "type": "string",
+      "description": "URL da imagem estilizada do produto"
+    },
+    "arquivo_pdf_url": {
+      "type": "string",
+      "description": "URL do arquivo PDF completo (apenas para produtos digitais)"
+    },
+    "arquivo_previa_url": {
+      "type": "string",
+      "description": "URL do arquivo de pr\u00e9via gratuita (para produtos digitais premium)"
+    },
+    "creditos_ia": {
+      "type": "number",
+      "default": 0,
+      "description": "Cr\u00e9ditos IA que o cliente recebe ao comprar este produto"
+    },
+    "destaque_home": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o produto aparece na p\u00e1gina inicial"
+    },
+    "exibir_no_catalogo": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o produto digital aparece no cat\u00e1logo p\u00fablico"
+    },
+    "ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se o produto est\u00e1 ativo"
+    },
+    "stripe_product_id": {
+      "type": "string",
+      "description": "ID do produto no Stripe (prod_...)"
+    },
+    "stripe_price_id": {
+      "type": "string",
+      "description": "ID do pre\u00e7o no Stripe (price_...)"
+    }
+  },
+  "required": [
+    "nome",
+    "preco",
+    "tipo"
+  ]
+}

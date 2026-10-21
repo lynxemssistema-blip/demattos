@@ -1,0 +1,17 @@
+[
+  {
+    "voz_tipo": "pt-BR-Male",
+    "velocidade_fala": 1.9,
+    "tom_voz": 1.1,
+    "volume": 1,
+    "audio_respostas_ativo": false,
+    "audio_entrada_ativo": true,
+    "ativo": true,
+    "id": "695033801f426f63427aeb8a",
+    "created_date": "2025-12-27T19:29:04.548000",
+    "updated_date": "2026-01-03T14:10:46.070000",
+    "created_by_id": "694fc9a4353fcf7bf1d594ee",
+    "created_by": "edsonmanoel2012@gmail.com",
+    "is_sample": false
+  }
+]

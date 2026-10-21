@@ -1,0 +1,33 @@
+{
+  "name": "HorarioDisponivel",
+  "type": "object",
+  "properties": {
+    "profissional_id": {
+      "type": "string",
+      "description": "ID do profissional"
+    },
+    "profissional_nome": {
+      "type": "string",
+      "description": "Nome do profissional"
+    },
+    "data": {
+      "type": "string",
+      "format": "date",
+      "description": "Data do hor\u00e1rio"
+    },
+    "horario": {
+      "type": "string",
+      "description": "Hor\u00e1rio (ex: 09:00)"
+    },
+    "disponivel": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se o hor\u00e1rio est\u00e1 dispon\u00edvel"
+    }
+  },
+  "required": [
+    "profissional_id",
+    "data",
+    "horario"
+  ]
+}

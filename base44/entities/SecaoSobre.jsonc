@@ -1,0 +1,64 @@
+{
+  "name": "SecaoSobre",
+  "type": "object",
+  "properties": {
+    "tag_superior": {
+      "type": "string",
+      "default": "Nossa Hist\u00f3ria",
+      "description": "Tag pequena acima do t\u00edtulo"
+    },
+    "titulo_parte1": {
+      "type": "string",
+      "default": "A Arte de Cuidar do",
+      "description": "Primeira parte do t\u00edtulo"
+    },
+    "titulo_parte2": {
+      "type": "string",
+      "default": "Homem Moderno",
+      "description": "Segunda parte do t\u00edtulo (em dourado)"
+    },
+    "paragrafo1": {
+      "type": "string",
+      "default": "A Barbearia DeMattos nasceu da paix\u00e3o genu\u00edna pelo of\u00edcio de barbeiro. Com mais de uma d\u00e9cada de dedica\u00e7\u00e3o, nos tornamos refer\u00eancia em cortes masculinos e cuidados com a barba."
+    },
+    "paragrafo2": {
+      "type": "string",
+      "default": "Nossa filosofia vai al\u00e9m do simples corte de cabelo. Acreditamos que cada homem merece um atendimento personalizado, onde t\u00e9cnica e aten\u00e7\u00e3o aos detalhes se unem para revelar o melhor de cada cliente."
+    },
+    "paragrafo3": {
+      "type": "string",
+      "default": "No nosso espa\u00e7o, tradi\u00e7\u00e3o e modernidade coexistem em harmonia, proporcionando uma experi\u00eancia \u00fanica de cuidado e bem-estar masculino."
+    },
+    "imagem_url": {
+      "type": "string",
+      "default": "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=800&q=80",
+      "description": "URL da imagem principal"
+    },
+    "destaque1_titulo": {
+      "type": "string",
+      "default": "T\u00e9cnicas Premium",
+      "description": "T\u00edtulo do primeiro destaque"
+    },
+    "destaque1_subtitulo": {
+      "type": "string",
+      "default": "Cortes modernos e cl\u00e1ssicos",
+      "description": "Subt\u00edtulo do primeiro destaque"
+    },
+    "destaque2_titulo": {
+      "type": "string",
+      "default": "Atendimento VIP",
+      "description": "T\u00edtulo do segundo destaque"
+    },
+    "destaque2_subtitulo": {
+      "type": "string",
+      "default": "Experi\u00eancia personalizada",
+      "description": "Subt\u00edtulo do segundo destaque"
+    },
+    "atendimentos_base": {
+      "type": "number",
+      "default": 5000,
+      "description": "N\u00famero base de atendimentos (ser\u00e1 somado aos realizados)"
+    }
+  },
+  "required": []
+}

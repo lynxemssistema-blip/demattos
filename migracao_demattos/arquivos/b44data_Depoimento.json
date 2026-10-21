@@ -1,0 +1,18 @@
+[
+  {
+    "texto": "Ótimo  atendimento aliado a uma técnica aprimorada.",
+    "aprovado": false,
+    "cliente_nome": "Carlos Gustavo da Silva",
+    "cliente_foto_url": "",
+    "avaliacao": 5,
+    "cliente_id": "697d1237a3228f1e0787a259",
+    "cliente_profissao": "Consultor de Certificação",
+    "enviado_para_aprovacao": false,
+    "id": "6983c3453aa56f8f362e9a5f",
+    "created_date": "2026-02-04T22:08:05.026000",
+    "updated_date": "2026-02-23T14:19:27.154000",
+    "created_by_id": "service_a0807159-7710-4a3e-9aa2-e74b58d86009",
+    "created_by": "service+a0807159-7710-4a3e-9aa2-e74b58d86009@no-reply.base44.com",
+    "is_sample": false
+  }
+]

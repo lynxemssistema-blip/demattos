@@ -1,0 +1,41 @@
+{
+  "name": "ImagemGaleria",
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "URL da imagem"
+    },
+    "alt": {
+      "type": "string",
+      "description": "Texto alternativo da imagem"
+    },
+    "colSpan": {
+      "type": "string",
+      "enum": [
+        "col-span-1",
+        "col-span-2"
+      ],
+      "default": "col-span-1",
+      "description": "Largura da imagem no grid"
+    },
+    "rowSpan": {
+      "type": "string",
+      "enum": [
+        "row-span-1",
+        "row-span-2"
+      ],
+      "default": "row-span-1",
+      "description": "Altura da imagem no grid"
+    },
+    "ordem": {
+      "type": "number",
+      "default": 0,
+      "description": "Ordem de exibi\u00e7\u00e3o"
+    }
+  },
+  "required": [
+    "url",
+    "alt"
+  ]
+}

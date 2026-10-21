@@ -1,0 +1,38 @@
+{
+  "name": "ConversaDeMattos",
+  "type": "object",
+  "properties": {
+    "cliente_id": {
+      "type": "string",
+      "description": "ID do cliente"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant"
+      ],
+      "description": "Quem enviou a mensagem"
+    },
+    "mensagem": {
+      "type": "string",
+      "description": "Conte\u00fado da mensagem"
+    },
+    "fotos_urls": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "URLs das fotos enviadas"
+    },
+    "previa_url": {
+      "type": "string",
+      "description": "URL da pr\u00e9via gerada"
+    }
+  },
+  "required": [
+    "cliente_id",
+    "role",
+    "mensagem"
+  ]
+}

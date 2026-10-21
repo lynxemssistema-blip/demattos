@@ -1,0 +1,31 @@
+{
+  "name": "ConversaWhatsApp",
+  "type": "object",
+  "properties": {
+    "telefone_cliente": {
+      "type": "string",
+      "description": "Telefone do cliente (formato padronizado com 55)"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant"
+      ],
+      "description": "Quem enviou a mensagem"
+    },
+    "mensagem": {
+      "type": "string",
+      "description": "Conte\u00fado da mensagem"
+    },
+    "dados_extraidos": {
+      "type": "object",
+      "description": "Dados extra\u00eddos pela IA (nome, servi\u00e7o, data, hora, etc)"
+    }
+  },
+  "required": [
+    "telefone_cliente",
+    "role",
+    "mensagem"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "InstagramVideo",
+  "type": "object",
+  "properties": {
+    "titulo": {
+      "type": "string",
+      "description": "T\u00edtulo do v\u00eddeo"
+    },
+    "url_instagram": {
+      "type": "string",
+      "description": "URL do post/v\u00eddeo do Instagram"
+    },
+    "thumbnail_url": {
+      "type": "string",
+      "description": "URL da imagem de capa/thumbnail do v\u00eddeo"
+    },
+    "video_url": {
+      "type": "string",
+      "description": "URL do arquivo de v\u00eddeo MP4 (upload)"
+    },
+    "descricao": {
+      "type": "string",
+      "description": "Descri\u00e7\u00e3o do v\u00eddeo"
+    },
+    "ordem": {
+      "type": "number",
+      "default": 0,
+      "description": "Ordem de exibi\u00e7\u00e3o"
+    },
+    "ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se o v\u00eddeo est\u00e1 ativo"
+    }
+  },
+  "required": [
+    "titulo",
+    "thumbnail_url"
+  ]
+}

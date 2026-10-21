@@ -1,0 +1,67 @@
+{
+  "name": "Cliente",
+  "type": "object",
+  "properties": {
+    "nome": {
+      "type": "string",
+      "description": "Nome completo do cliente"
+    },
+    "telefone": {
+      "type": "string",
+      "description": "Telefone/WhatsApp do cliente"
+    },
+    "email": {
+      "type": "string",
+      "description": "E-mail do cliente"
+    },
+    "instagram": {
+      "type": "string",
+      "description": "Instagram do cliente"
+    },
+    "facebook": {
+      "type": "string",
+      "description": "Facebook do cliente"
+    },
+    "profissao": {
+      "type": "string",
+      "description": "Profiss\u00e3o do cliente"
+    },
+    "foto_url": {
+      "type": "string",
+      "description": "URL da foto do cliente"
+    },
+    "data_nascimento": {
+      "type": "string",
+      "format": "date",
+      "description": "Data de nascimento"
+    },
+    "observacoes": {
+      "type": "string",
+      "description": "Observa\u00e7\u00f5es sobre o cliente"
+    },
+    "tem_canal": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o cliente tem canal DeMattos"
+    },
+    "senha_canal": {
+      "type": "string",
+      "description": "Senha do canal do cliente"
+    },
+    "ai_credits": {
+      "type": "number",
+      "default": 0,
+      "description": "Cr\u00e9ditos IA dispon\u00edveis para o cliente"
+    },
+    "cadastrado_via_whatsapp": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se o cliente foi cadastrado via WhatsApp"
+    }
+  },
+  "required": [
+    "nome",
+    "telefone",
+    "email"
+  ]
+}

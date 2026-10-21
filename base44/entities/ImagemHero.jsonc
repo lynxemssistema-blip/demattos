@@ -1,0 +1,28 @@
+{
+  "name": "ImagemHero",
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "description": "URL da imagem"
+    },
+    "alt": {
+      "type": "string",
+      "description": "Texto alternativo da imagem"
+    },
+    "ordem": {
+      "type": "number",
+      "default": 0,
+      "description": "Ordem de exibi\u00e7\u00e3o no carrossel"
+    },
+    "ativo": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se a imagem est\u00e1 ativa"
+    }
+  },
+  "required": [
+    "url",
+    "alt"
+  ]
+}
