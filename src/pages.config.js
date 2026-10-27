@@ -71,6 +71,7 @@ import ProdutoLanding from './pages/ProdutoLanding';
 import StripeCancel from './pages/StripeCancel';
 import StripeSuccess from './pages/StripeSuccess';
 import AdminTentativasCompra from './pages/AdminTentativasCompra';
+import AdminWhatsApp from './pages/AdminWhatsApp';
 import Login from './pages/Login';
 import __Layout from './Layout.jsx';
 
@@ -100,6 +101,7 @@ export const PAGES = {
     "StripeCancel": StripeCancel,
     "StripeSuccess": StripeSuccess,
     "AdminTentativasCompra": AdminTentativasCompra,
+    "AdminWhatsApp": AdminWhatsApp,
     "Login": Login,
 }
 

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
+import { evolutionApi } from '@/api/evolutionClient';
 
 export async function invokeSupabaseFunction(functionName, params = {}) {
   try {
@@ -292,12 +293,500 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
       }
 
       case 'getHorariosDisponiveis': {
-        let query = supabase.from('horario_disponivel').select('*').eq('disponivel', true);
-        if (params.data) query = query.eq('data', params.data);
-        if (params.profissional_id) query = query.eq('profissional_id', params.profissional_id);
-        const { data, error } = await query;
-        if (error) throw error;
-        return { data: { success: true, horarios: data || [] } };
+        const { profissional_id, data } = params;
+        if (!profissional_id || !data) {
+          return { data: { success: true, horarios: [] } };
+        }
+
+        const [ano, mes, dia] = data.split('-').map(Number);
+        const dataObj = new Date(ano, mes - 1, dia);
+        const diaSemana = dataObj.getDay(); // 0=Dom, 1=Seg, ... 6=Sab
+
+        // Buscar dados do profissional
+        const { data: prof } = await supabase
+          .from('profissional')
+          .select('id, nome, ativo')
+          .eq('id', profissional_id)
+          .maybeSingle();
+
+        if (!prof || !prof.ativo) {
+          return { data: { success: true, horarios: [] } };
+        }
+
+        // Buscar configuração da agenda
+        const { data: configs } = await supabase
+          .from('config_agenda_profissional')
+          .select('*')
+          .eq('profissional_id', profissional_id);
+
+        const config = (configs && configs.length > 0) ? configs[0] : {
+          dias_semana: [1, 2, 3, 4, 5, 6],
+          horario_inicio: '09:00',
+          horario_fim: '19:00',
+          horario_almoco_inicio: '12:00',
+          horario_almoco_fim: '13:00',
+          intervalo_minutos: 30
+        };
+
+        const diasAtendimento = Array.isArray(config.dias_semana) ? config.dias_semana : [1, 2, 3, 4, 5, 6];
+        if (!diasAtendimento.includes(diaSemana)) {
+          return { data: { success: true, horarios: [] } };
+        }
+
+        // Buscar agendamentos existentes e registros manuais em paralelo
+        const [agendamentosRes, horariosDbRes] = await Promise.all([
+          supabase
+            .from('agendamento')
+            .select('horario, horario_fim, duracao_total, status')
+            .eq('profissional_id', profissional_id)
+            .eq('data', data)
+            .in('status', ['pendente', 'confirmado']),
+          supabase
+            .from('horario_disponivel')
+            .select('horario, disponivel')
+            .eq('profissional_id', profissional_id)
+            .eq('data', data)
+        ]);
+
+        const agendamentos = agendamentosRes.data || [];
+        const horariosDb = horariosDbRes.data || [];
+
+        const bloqueadosSet = new Set();
+        const explicitosDisponiveis = new Set();
+        horariosDb.forEach(h => {
+          if (h.disponivel === false) bloqueadosSet.add(h.horario);
+          if (h.disponivel === true) explicitosDisponiveis.add(h.horario);
+        });
+
+        let almocoIniMin = null;
+        let almocoFimMin = null;
+        if (config.horario_almoco_inicio && config.horario_almoco_fim) {
+          const [hAIni, mAIni] = config.horario_almoco_inicio.split(':').map(Number);
+          const [hAFim, mAFim] = config.horario_almoco_fim.split(':').map(Number);
+          almocoIniMin = hAIni * 60 + mAIni;
+          almocoFimMin = hAFim * 60 + mAFim;
+        }
+
+        const [hIni, mIni] = (config.horario_inicio || '09:00').split(':').map(Number);
+        const [hFim, mFim] = (config.horario_fim || '19:00').split(':').map(Number);
+        const inicioGradeMin = hIni * 60 + mIni;
+        const fimGradeMin = hFim * 60 + mFim;
+        const intervalo = Number(config.intervalo_minutos) || 30;
+
+        // Horário atual no fuso de Brasília
+        const agora = new Date();
+        const agoraSp = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+        const anoStr = agoraSp.getFullYear();
+        const mesStr = String(agoraSp.getMonth() + 1).padStart(2, '0');
+        const dStr = String(agoraSp.getDate()).padStart(2, '0');
+        const hojeStr = `${anoStr}-${mesStr}-${dStr}`;
+        const minutosAgora = agoraSp.getHours() * 60 + agoraSp.getMinutes();
+        const ehHoje = (data === hojeStr);
+
+        const todosSlots = new Set();
+        for (let m = inicioGradeMin; m < fimGradeMin; m += intervalo) {
+          const hh = Math.floor(m / 60).toString().padStart(2, '0');
+          const mm = (m % 60).toString().padStart(2, '0');
+          todosSlots.add(`${hh}:${mm}`);
+        }
+        explicitosDisponiveis.forEach(slot => todosSlots.add(slot));
+
+        const slotsOrdenados = Array.from(todosSlots).sort();
+        const horariosValidos = [];
+
+        for (const slot of slotsOrdenados) {
+          const [sh, sm] = slot.split(':').map(Number);
+          const slotMin = sh * 60 + sm;
+
+          // Se for hoje e já passou (com 15 min de margem)
+          if (ehHoje && slotMin <= minutosAgora + 15) continue;
+
+          // Se estiver no almoço
+          if (almocoIniMin !== null && slotMin >= almocoIniMin && slotMin < almocoFimMin) continue;
+
+          // Se estiver bloqueado manualmente
+          if (bloqueadosSet.has(slot)) continue;
+
+          // Se conflita com agendamento ativo
+          const conflito = agendamentos.some(ag => {
+            const [agH, agM] = ag.horario.split(':').map(Number);
+            const agIni = agH * 60 + agM;
+            const agDuracao = ag.duracao_total || 30;
+            const agFim = ag.horario_fim
+              ? (Number(ag.horario_fim.split(':')[0]) * 60 + Number(ag.horario_fim.split(':')[1]))
+              : (agIni + agDuracao);
+            return slotMin >= agIni && slotMin < agFim;
+          });
+
+          if (!conflito) {
+            horariosValidos.push({
+              profissional_id,
+              profissional_nome: prof.nome,
+              data,
+              horario: slot,
+              disponivel: true
+            });
+          }
+        }
+
+        return { data: { success: true, horarios: horariosValidos } };
+      }
+
+      case 'criarAgendamentoPublico': {
+        const { formData } = params;
+        if (!formData) return { data: { error: 'Dados do formulário não fornecidos.' } };
+
+        const {
+          name,
+          phone,
+          email,
+          profissional_id,
+          data,
+          horario,
+          servicos_ids,
+          message,
+          senhaCanal
+        } = formData;
+
+        if (!name || !phone || !email || !profissional_id || !data || !horario) {
+          return { data: { error: 'Por favor, preencha todos os campos obrigatórios.' } };
+        }
+
+        if (!servicos_ids || servicos_ids.length === 0) {
+          return { data: { error: 'Por favor, selecione pelo menos um serviço.' } };
+        }
+
+        const telefoneNormalizado = phone.replace(/\D/g, '');
+        if (telefoneNormalizado.length < 10) {
+          return { data: { error: 'O telefone deve ter pelo menos 10 dígitos.' } };
+        }
+
+        // Buscar profissional
+        const { data: prof, error: profErr } = await supabase
+          .from('profissional')
+          .select('*')
+          .eq('id', profissional_id)
+          .maybeSingle();
+
+        if (profErr || !prof) {
+          return { data: { error: 'Profissional não encontrado.' } };
+        }
+
+        // Buscar serviços
+        const { data: servicosDb } = await supabase
+          .from('servico')
+          .select('*')
+          .in('id', servicos_ids);
+
+        const servicosSelecionados = servicosDb || [];
+        const duracaoTotal = servicosSelecionados.reduce((total, s) => total + (s.duracao || 30), 0) || 30;
+        const nomesServicos = servicosSelecionados.length > 0
+          ? servicosSelecionados.map(s => s.nome).join(', ')
+          : 'Serviço Barbearia';
+
+        const [hIni, mIni] = horario.split(':').map(Number);
+        const inicioMinutos = hIni * 60 + mIni;
+        const fimMinutos = inicioMinutos + duracaoTotal;
+        const horaFimStr = Math.floor(fimMinutos / 60).toString().padStart(2, '0');
+        const minFimStr = (fimMinutos % 60).toString().padStart(2, '0');
+        const horarioFim = `${horaFimStr}:${minFimStr}`;
+
+        // Verificar conflitos de horário com agendamentos existentes
+        const { data: agExistentes } = await supabase
+          .from('agendamento')
+          .select('horario, horario_fim, duracao_total')
+          .eq('profissional_id', profissional_id)
+          .eq('data', data)
+          .in('status', ['pendente', 'confirmado']);
+
+        const conflitoProfissional = (agExistentes || []).some(ag => {
+          const [agH, agM] = ag.horario.split(':').map(Number);
+          const agInicio = agH * 60 + agM;
+          const agFim = ag.horario_fim
+            ? (Number(ag.horario_fim.split(':')[0]) * 60 + Number(ag.horario_fim.split(':')[1]))
+            : (agInicio + (ag.duracao_total || 30));
+          return (inicioMinutos >= agInicio && inicioMinutos < agFim) ||
+                 (fimMinutos > agInicio && fimMinutos <= agFim) ||
+                 (inicioMinutos <= agInicio && fimMinutos >= agFim);
+        });
+
+        if (conflitoProfissional) {
+          return { data: { error: `O profissional ${prof.nome} já possui agendamento neste horário. Por favor, escolha outro horário.` } };
+        }
+
+        // Verificar confirmação automática nas configurações
+        const { data: configConf } = await supabase
+          .from('configuracao')
+          .select('valor')
+          .eq('chave', 'confirmacao_automatica_agendamento')
+          .maybeSingle();
+
+        const confirmadoAuto = configConf ? (configConf.valor === 'true') : true;
+
+        // Upsert do cliente
+        try {
+          const { data: clienteExistente } = await supabase
+            .from('cliente')
+            .select('*')
+            .or(`telefone.eq.${telefoneNormalizado},email.ilike.${email.trim()}`)
+            .maybeSingle();
+
+          if (clienteExistente) {
+            await supabase.from('cliente').update({
+              nome: name,
+              email: email.trim()
+            }).eq('id', clienteExistente.id);
+          } else {
+            await supabase.from('cliente').insert({
+              nome: name,
+              telefone: telefoneNormalizado,
+              email: email.trim(),
+              observacoes: message || '',
+              tem_canal: !!senhaCanal,
+              senha_canal: senhaCanal || null,
+              ai_credits: 0
+            });
+          }
+        } catch (e) {
+          console.warn('[criarAgendamentoPublico] Aviso ao sincronizar cliente:', e);
+        }
+
+        // Inserir agendamento
+        const { data: novoAgendamento, error: agErr } = await supabase
+          .from('agendamento')
+          .insert({
+            cliente_nome: name,
+            cliente_telefone: telefoneNormalizado,
+            profissional_id,
+            profissional_nome: prof.nome,
+            servico: nomesServicos,
+            data,
+            horario,
+            horario_fim: horarioFim,
+            duracao_total: duracaoTotal,
+            observacoes: message || '',
+            status: confirmadoAuto ? 'confirmado' : 'pendente',
+            confirmado_automaticamente: confirmadoAuto
+          })
+          .select()
+          .single();
+
+        if (agErr) throw agErr;
+
+        // Marcar slot em horario_disponivel se existir
+        try {
+          const { data: slotDb } = await supabase
+            .from('horario_disponivel')
+            .select('id')
+            .eq('profissional_id', profissional_id)
+            .eq('data', data)
+            .eq('horario', horario)
+            .maybeSingle();
+
+          if (slotDb) {
+            await supabase.from('horario_disponivel').update({ disponivel: false }).eq('id', slotDb.id);
+          } else {
+            await supabase.from('horario_disponivel').insert({
+              profissional_id,
+              profissional_nome: prof.nome,
+              data,
+              horario,
+              disponivel: false
+            });
+          }
+        } catch (e) {
+          // Não bloqueia agendamento
+        }
+
+        // Disparo automático WhatsApp (respeita modo oficial vs teste)
+        evolutionApi.sendAppointmentNotification('confirmacao', novoAgendamento).catch(err => {
+          console.warn('[WhatsApp] Aviso ao enviar notificação de agendamento:', err);
+        });
+
+        return {
+          data: {
+            success: true,
+            agendamento: novoAgendamento,
+            agendamento_id: novoAgendamento.id,
+            confirmado_automaticamente: confirmadoAuto
+          }
+        };
+      }
+
+      case 'criarProfissional': {
+        const { profissionalData, configAgenda } = params;
+        if (!profissionalData?.nome) {
+          return { data: { error: 'Nome do profissional é obrigatório.' } };
+        }
+
+        const { data: prof, error: errProf } = await supabase
+          .from('profissional')
+          .insert([profissionalData])
+          .select()
+          .single();
+
+        if (errProf) throw errProf;
+
+        if (configAgenda && prof?.id) {
+          try {
+            await supabase.from('config_agenda_profissional').insert([{
+              profissional_id: prof.id,
+              dias_semana: configAgenda.dias_semana || [1, 2, 3, 4, 5, 6],
+              horario_inicio: configAgenda.horario_inicio || '09:00',
+              horario_fim: configAgenda.horario_fim || '18:00',
+              horario_almoco_inicio: configAgenda.horario_almoco_inicio || null,
+              horario_almoco_fim: configAgenda.horario_almoco_fim || null,
+              intervalo_minutos: configAgenda.intervalo_minutos || 30
+            }]);
+          } catch (e) {
+            console.warn('[criarProfissional] config_agenda:', e);
+          }
+        }
+
+        return { data: { success: true, profissional: prof } };
+      }
+
+      case 'atualizarProfissional': {
+        const { profissional_id, profissionalData, configAgenda, configId } = params;
+        if (!profissional_id) {
+          return { data: { error: 'ID do profissional é obrigatório.' } };
+        }
+
+        const { data: prof, error: errProf } = await supabase
+          .from('profissional')
+          .update(profissionalData)
+          .eq('id', profissional_id)
+          .select()
+          .single();
+
+        if (errProf) throw errProf;
+
+        if (configAgenda) {
+          const configData = {
+            profissional_id,
+            dias_semana: configAgenda.dias_semana || [1, 2, 3, 4, 5, 6],
+            horario_inicio: configAgenda.horario_inicio || '09:00',
+            horario_fim: configAgenda.horario_fim || '18:00',
+            horario_almoco_inicio: configAgenda.horario_almoco_inicio || null,
+            horario_almoco_fim: configAgenda.horario_almoco_fim || null,
+            intervalo_minutos: configAgenda.intervalo_minutos || 30
+          };
+
+          try {
+            if (configId) {
+              await supabase.from('config_agenda_profissional').update(configData).eq('id', configId);
+            } else {
+              await supabase.from('config_agenda_profissional').insert([configData]);
+            }
+          } catch (e) {
+            console.warn('[atualizarProfissional] config_agenda:', e);
+          }
+        }
+
+        return { data: { success: true, profissional: prof } };
+      }
+
+      case 'criarAgendamentoChat': {
+        const { cliente_id, profissional_nome, servico_nome, data, horario, observacoes } = params;
+        if (!cliente_id || !profissional_nome || !servico_nome || !data || !horario) {
+          return { data: { error: 'Dados incompletos para agendamento via assistente.' } };
+        }
+
+        const { data: cliente } = await supabase.from('cliente').select('*').eq('id', cliente_id).maybeSingle();
+        if (!cliente) return { data: { error: 'Cliente não encontrado.' } };
+
+        const { data: profs } = await supabase.from('profissional').select('*').ilike('nome', profissional_nome.trim()).maybeSingle();
+        if (!profs) return { data: { error: `Profissional ${profissional_nome} não encontrado.` } };
+
+        const { data: servs } = await supabase.from('servico').select('*').ilike('nome', servico_nome.trim()).maybeSingle();
+        const duracao = servs?.duracao || 30;
+
+        const [h, m] = horario.split(':').map(Number);
+        const fimMin = h * 60 + m + duracao;
+        const horarioFim = `${Math.floor(fimMin / 60).toString().padStart(2, '0')}:${(fimMin % 60).toString().padStart(2, '0')}`;
+
+        const { data: ag, error: agErr } = await supabase.from('agendamento').insert({
+          cliente_nome: cliente.nome,
+          cliente_telefone: cliente.telefone,
+          profissional_id: profs.id,
+          profissional_nome: profs.nome,
+          servico: servs?.nome || servico_nome,
+          data,
+          horario,
+          horario_fim: horarioFim,
+          duracao_total: duracao,
+          observacoes: observacoes || 'Agendado via IA DeMattos',
+          status: 'confirmado',
+          confirmado_automaticamente: true
+        }).select().single();
+
+        if (agErr) throw agErr;
+        return { data: { success: true, agendamento: ag } };
+      }
+
+      case 'criarAgendamentoRecorrente': {
+        const { cliente_id, cliente_telefone, formData } = params;
+        if (!cliente_id || !cliente_telefone || !formData) {
+          return { data: { error: 'Dados incompletos para agendamento recorrente.' } };
+        }
+
+        const { data: cliente } = await supabase.from('cliente').select('*').eq('id', cliente_id).maybeSingle();
+        const { data: prof } = await supabase.from('profissional').select('*').eq('id', formData.profissional_id).maybeSingle();
+        const { data: serv } = await supabase.from('servico').select('*').eq('id', formData.servico_id).maybeSingle();
+
+        if (!prof || !serv) {
+          return { data: { error: 'Profissional ou serviço não encontrado.' } };
+        }
+
+        const duracao = serv.duracao || 30;
+        const [h, m] = formData.horario.split(':').map(Number);
+        const fimMin = h * 60 + m + duracao;
+        const horarioFim = `${Math.floor(fimMin / 60).toString().padStart(2, '0')}:${(fimMin % 60).toString().padStart(2, '0')}`;
+
+        const datas = [];
+        const hoje = new Date();
+        const diaSelecionado = parseInt(formData.dia_semana, 10);
+        let dataAtual = new Date(hoje);
+
+        while (dataAtual.getDay() !== diaSelecionado) {
+          dataAtual.setDate(dataAtual.getDate() + 1);
+        }
+
+        const qtd = parseInt(formData.quantidade, 10) || 4;
+        for (let i = 0; i < qtd; i++) {
+          datas.push(new Date(dataAtual));
+          if (formData.frequencia === 'semanal') {
+            dataAtual.setDate(dataAtual.getDate() + 7);
+          } else if (formData.frequencia === 'quinzenal') {
+            dataAtual.setDate(dataAtual.getDate() + 14);
+          } else {
+            dataAtual.setMonth(dataAtual.getMonth() + 1);
+          }
+        }
+
+        const agendamentosParaInserir = datas.map(d => ({
+          cliente_nome: cliente?.nome || formData.cliente_nome || 'Cliente',
+          cliente_telefone,
+          profissional_id: prof.id,
+          profissional_nome: prof.nome,
+          servico: serv.nome,
+          data: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+          horario: formData.horario,
+          horario_fim: horarioFim,
+          duracao_total: duracao,
+          observacoes: formData.observacoes || 'Agendamento recorrente',
+          status: 'confirmado',
+          confirmado_automaticamente: true,
+          eh_recorrente: true
+        }));
+
+        const { data: criados, error: insErr } = await supabase
+          .from('agendamento')
+          .insert(agendamentosParaInserir)
+          .select();
+
+        if (insErr) throw insErr;
+        return { data: { success: true, quantidade: criados?.length || 0, agendamentos: criados } };
       }
 
       case 'loginProfissional': {
@@ -422,6 +911,14 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         const targetId = id || agendamento_id;
         const { data, error } = await supabase.from('agendamento').update({ status: 'cancelado' }).eq('id', targetId).select().single();
         if (error) throw error;
+
+        // Disparo de notificação de cancelamento WhatsApp
+        if (data) {
+          evolutionApi.sendAppointmentNotification('cancelamento', data).catch(err => {
+            console.warn('[WhatsApp] Aviso ao enviar cancelamento:', err);
+          });
+        }
+
         return { data: { success: true, agendamento: data } };
       }
 

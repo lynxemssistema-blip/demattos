@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
 import AdminRoute from '@/components/auth/AdminRoute';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Package, DollarSign, Edit, Trash2, TrendingUp, Upload, Loader2, FileText, Download, Eye, ShoppingCart, Award, RefreshCw, Link2, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Package, DollarSign, Edit, Trash2, TrendingUp, Loader2, FileText, Download, Eye, Award, RefreshCw, Copy, Check } from 'lucide-react';
 import AIProductDescriptionAssistant from '@/components/admin/AIProductDescriptionAssistant';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { MessageCircle, Send, Mic, MicOff, X, Loader2, Camera, Image as ImageIcon, Coins, Sparkles } from 'lucide-react';
+import { MessageCircle, Send, Mic, MicOff, X, Loader2, Camera, Sparkles } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';

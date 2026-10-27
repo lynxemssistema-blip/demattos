@@ -11,12 +11,10 @@ import {
   Package, 
   Settings, 
   TrendingUp,
-  Clock,
-  CheckCircle,
-  XCircle,
   HelpCircle,
   Video,
-  Receipt
+  Receipt,
+  Smartphone
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -124,6 +122,16 @@ function AdminContent() {
       link: createPageUrl('AdminClientes'),
       color: 'bg-green-500',
       help: 'Cadastre e gerencie informações completas dos clientes, incluindo contatos, redes sociais e observações.',
+    },
+    {
+      title: 'Evolution WhatsApp',
+      description: 'QR Code, Modelos de Mensagem e Lembretes',
+      icon: Smartphone,
+      count: null,
+      badge: 'Instância DeMattos',
+      link: createPageUrl('AdminWhatsApp'),
+      color: 'bg-[#25D366]',
+      help: 'Gerenciador da Evolution API: conecte o WhatsApp da barbearia lendo o QR Code pelo celular. Configure os modelos de confirmação, cancelamento, lembretes agendados e selecione Modo de Teste (Luan) ou Modo Oficial.',
     },
     {
       title: 'Serviços',
@@ -307,6 +315,11 @@ function AdminContent() {
                           <div className="text-xl sm:text-2xl font-bold text-white">
                             {item.count}
                           </div>
+                        )}
+                        {item.badge && (
+                          <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-[#25D366]/15 text-[#25D366] border border-[#25D366]/30 whitespace-nowrap">
+                            {item.badge}
+                          </span>
                         )}
                         <Tooltip>
                           <TooltipTrigger asChild>

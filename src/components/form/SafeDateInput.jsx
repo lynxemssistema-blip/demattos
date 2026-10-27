@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
-import { formatDateForInput, parseDateFromInput } from '@/lib/SafariCompat';
+import { parseDateFromInput } from '@/lib/SafariCompat';
 
 /**
  * Input de data com fallback para Safari

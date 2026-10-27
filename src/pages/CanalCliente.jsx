@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Lock, User, Calendar, Clock, ArrowLeft, Edit, Star, Plus, Send, CheckCircle, XCircle, Trash2, Sparkles, Ban, ChevronDown, ChevronUp, Coins, Download, FileText, X } from 'lucide-react';
+import { User, Calendar, Clock, ArrowLeft, Edit, Star, Plus, Send, CheckCircle, XCircle, Trash2, Sparkles, Ban, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { format } from 'date-fns';

@@ -24,7 +24,6 @@ import {
   FileText,
   Download,
   Award,
-  Star,
   Zap,
   Eye
 } from 'lucide-react';

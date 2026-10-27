@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -9,7 +9,7 @@ import { Calendar, Clock, AlertCircle, Info, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import SafeDateInput from '@/components/form/SafeDateInput';
 import SearchableSelect from '@/components/ui/searchable-select';
-import { createSafariDate, isValidSafariDate } from '@/lib/SafariCompat';
+import { isValidSafariDate } from '@/lib/SafariCompat';
 
 export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin, preSelectedData }) {
   const [clientes, setClientes] = useState([]);

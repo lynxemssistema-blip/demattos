@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { User, Scissors, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';

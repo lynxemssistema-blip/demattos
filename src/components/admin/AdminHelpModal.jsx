@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
-  HelpCircle, Calendar, Users, Scissors, Package, Settings,
-  TrendingUp, Video, Plug, ChevronDown, ChevronRight, Zap,
+  HelpCircle, Calendar, Users, Package, Settings, Video, Plug, ChevronDown, ChevronRight, Zap,
   ShoppingCart, Image, Star, Bot, CreditCard, Layers, BarChart2
 } from 'lucide-react';
 

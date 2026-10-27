@@ -15,7 +15,7 @@ import AgendamentosTableView from '@/components/admin/AgendamentosTableView';
 import AgendamentosCalendarView from '@/components/admin/AgendamentosCalendarView';
 import AgendamentoForm from '@/components/AgendamentoForm';
 import AgendamentosDailyAgendaModal from '@/components/admin/AgendamentosDailyAgendaModal';
-import { isValidSafariDate, createSafariDate } from '@/lib/SafariCompat';
+import { isValidSafariDate } from '@/lib/SafariCompat';
 
 function AdminAgendamentosContent() {
   const [viewMode, setViewMode] = useState(() => {
