@@ -22,18 +22,23 @@ export default function AdminRoute({ children }) {
 
         setUserName(user.full_name || user.email);
 
-        // Verificar se é admin via role OU via Profissional.tem_acesso_admin
-        if (user.role === 'admin' || user.role === 'superadmin') {
+        // Verificar se é admin via role OU via flag isAdmin OU via email OU via Profissional.tem_acesso_admin
+        const userEmail = (user.email || '').toLowerCase().trim();
+        const isPrivilegedEmail = ['luandemattos102030@gmail.com', 'edsonmanoel2012@gmail.com'].includes(userEmail);
+
+        if (user.isAdmin || user.role === 'admin' || user.role === 'superadmin' || isPrivilegedEmail) {
           setIsAdmin(true);
         } else {
           // Verificar se é profissional com acesso admin
-          const profissionais = await base44.asServiceRole.entities.Profissional.filter({ 
-            email: user.email,
-            tem_acesso_admin: true,
-            ativo: true
-          });
-          
-          setIsAdmin(profissionais.length > 0);
+          try {
+            const profissionais = await base44.asServiceRole.entities.Profissional.filter({ 
+              email: user.email,
+              tem_acesso_admin: true
+            });
+            setIsAdmin(profissionais.length > 0);
+          } catch (e) {
+            setIsAdmin(false);
+          }
         }
       } catch (error) {
         base44.auth.redirectToLogin();

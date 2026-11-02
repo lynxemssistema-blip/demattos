@@ -23,7 +23,7 @@ import PullToRefresh from '@/components/PullToRefresh';
 import { useQueryClient } from '@tanstack/react-query';
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const queryClient = useQueryClient();
 
@@ -39,10 +39,9 @@ export default function Home() {
     await queryClient.refetchQueries({ queryKey: ['home-data'] });
   };
 
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
-
   const adminPages = useMemo(() => [
     { name: 'Admin', url: createPageUrl('Admin'), label: 'Painel Admin' },
+    { name: 'WhatsApp', url: createPageUrl('AdminWhatsApp'), label: 'WhatsApp Evo' },
     { name: 'Agendamentos', url: createPageUrl('AdminAgendamentos'), label: 'Agendamentos' },
     { name: 'Clientes', url: createPageUrl('AdminClientes'), label: 'Clientes' },
     { name: 'Serviços', url: createPageUrl('AdminServicos'), label: 'Serviços' },
@@ -85,18 +84,19 @@ export default function Home() {
         )}
 
         {isAdmin && (
-          <div className="fixed top-20 right-4 z-30 pointer-events-auto hidden md:block">
-            <div className="bg-[#1a1a1a] border border-[#D4AF37] rounded-lg shadow-2xl overflow-hidden pointer-events-auto">
-              <button onClick={() => setShowAdminPanel(!showAdminPanel)} className="flex items-center gap-2 px-4 py-3 bg-[#D4AF37] text-black font-semibold hover:bg-[#B8973D] transition-colors w-full touch-manipulation">
-                <Settings className="w-5 h-5" /> Acesso Rápido Admin
+          <div className="fixed top-24 right-4 z-30 pointer-events-auto">
+            <div className="bg-[#1a1a1a]/95 backdrop-blur-md border border-[#D4AF37] rounded-lg shadow-2xl overflow-hidden pointer-events-auto max-w-[280px] sm:max-w-xs">
+              <button onClick={() => setShowAdminPanel(!showAdminPanel)} className="flex items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 bg-[#D4AF37] text-black font-bold text-xs sm:text-sm hover:bg-[#B8973D] transition-colors w-full touch-manipulation">
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span>Acesso Rápido Admin</span>
                 {showAdminPanel ? <ChevronUp className="w-4 h-4 ml-auto" /> : <ChevronDown className="w-4 h-4 ml-auto" />}
               </button>
               {showAdminPanel && (
-                <div className="p-3 max-h-[70vh] overflow-y-auto">
-                  <div className="grid grid-cols-2 gap-2">
+                <div className="p-2 sm:p-3 max-h-[60vh] overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
                     {adminPages.map((page) => (
-                      <Link key={page.name} to={page.url}>
-                        <Button variant="ghost" className="w-full justify-start text-white hover:bg-[#D4AF37]/20 hover:text-[#D4AF37] text-xs touch-manipulation">{page.label}</Button>
+                      <Link key={page.name} to={page.url} onClick={() => setShowAdminPanel(false)}>
+                        <Button variant="ghost" className="w-full justify-start text-white hover:bg-[#D4AF37]/20 hover:text-[#D4AF37] text-[11px] sm:text-xs py-1.5 h-auto touch-manipulation truncate">{page.label}</Button>
                       </Link>
                     ))}
                   </div>

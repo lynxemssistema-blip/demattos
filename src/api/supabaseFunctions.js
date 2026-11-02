@@ -158,16 +158,16 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
       case 'promoverClienteAdmin': {
         const { cliente_email, promover } = params;
-        const { data: usersData } = await supabase.auth.admin.listUsers({ perPage: 1000 });
-        const target = usersData?.users?.find(u => u.email?.toLowerCase() === cliente_email?.toLowerCase());
-        if (target) {
-          await supabase.from('profiles').update({ role: promover ? 'admin' : 'user' }).eq('id', target.id);
-          await supabase.auth.admin.updateUserById(target.id, {
-            user_metadata: { role: promover ? 'admin' : 'user' },
-            app_metadata: { role: promover ? 'admin' : 'user' }
-          });
-        }
-        return { data: { success: true } };
+        if (!cliente_email) return { data: { success: false, error: 'Email obrigatório' } };
+        const cleanEmail = cliente_email.trim().toLowerCase();
+        
+        // Atualiza perfil na tabela profiles
+        await supabase.from('profiles').update({ role: promover ? 'admin' : 'user' }).ilike('email', cleanEmail);
+        
+        // Se for profissional na equipe, atualiza também tem_acesso_admin
+        await supabase.from('profissional').update({ tem_acesso_admin: !!promover }).ilike('email', cleanEmail);
+
+        return { data: { success: true, message: promover ? 'Usuário promovido a administrador!' : 'Acesso de administrador revogado.' } };
       }
 
       case 'grantAICredits': {
@@ -598,9 +598,16 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           // Não bloqueia agendamento
         }
 
-        // Disparo automático WhatsApp (respeita modo oficial vs teste)
-        evolutionApi.sendAppointmentNotification('confirmacao', novoAgendamento).catch(err => {
-          console.warn('[WhatsApp] Aviso ao enviar notificação de agendamento:', err);
+        // Disparo automático WhatsApp ao cliente (respeita modo oficial vs teste)
+        if (confirmadoAuto) {
+          evolutionApi.sendAppointmentNotification('confirmacao', novoAgendamento).catch(err => {
+            console.warn('[WhatsApp] Aviso ao enviar notificação de agendamento ao cliente:', err);
+          });
+        }
+
+        // Disparo automático WhatsApp ao barbeiro (novo agendamento recebido)
+        evolutionApi.notifyBarberNewAppointment(novoAgendamento, prof.telefone).catch(err => {
+          console.warn('[WhatsApp] Aviso ao enviar notificação ao barbeiro:', err);
         });
 
         return {
@@ -912,21 +919,81 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         const { data, error } = await supabase.from('agendamento').update({ status: 'cancelado' }).eq('id', targetId).select().single();
         if (error) throw error;
 
-        // Disparo de notificação de cancelamento WhatsApp
+        // Disparo de notificação de cancelamento WhatsApp para o cliente
         if (data) {
           evolutionApi.sendAppointmentNotification('cancelamento', data).catch(err => {
-            console.warn('[WhatsApp] Aviso ao enviar cancelamento:', err);
+            console.warn('[WhatsApp] Aviso ao enviar cancelamento ao cliente:', err);
           });
+
+          // Notificar também o barbeiro sobre o cancelamento
+          if (data.profissional_id) {
+            supabase.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle().then(({ data: prof }) => {
+              evolutionApi.notifyBarberCancellation(data, prof?.telefone).catch(err => {
+                console.warn('[WhatsApp] Aviso ao enviar cancelamento ao barbeiro:', err);
+              });
+            }).catch(() => {});
+          }
         }
 
         return { data: { success: true, agendamento: data } };
       }
 
       case 'atualizarStatusAgendamento': {
-        const { id, agendamento_id, status } = params;
-        const targetId = id || agendamento_id;
-        const { data, error } = await supabase.from('agendamento').update({ status }).eq('id', targetId).select().single();
+        const targetId = params.id || params.agendamento_id || params.agendamentoId;
+        const targetStatus = params.status || params.novoStatus;
+
+        if (!targetId || !targetStatus) {
+          return { data: { error: 'ID e status do agendamento são obrigatórios.' } };
+        }
+
+        // Buscar agendamento atual antes da alteração para checar transição de status
+        const { data: agAnterior } = await supabase
+          .from('agendamento')
+          .select('*')
+          .eq('id', targetId)
+          .maybeSingle();
+
+        const { data, error } = await supabase
+          .from('agendamento')
+          .update({ status: targetStatus })
+          .eq('id', targetId)
+          .select()
+          .single();
+
         if (error) throw error;
+
+        // 1. Se o barbeiro confirmou manualmente um agendamento (ex: estava 'pendente')
+        if (targetStatus === 'confirmado' && agAnterior?.status !== 'confirmado') {
+          evolutionApi.sendAppointmentNotification('confirmacao', data).catch(err => {
+            console.warn('[WhatsApp] Aviso ao enviar confirmação manual ao cliente:', err);
+          });
+        }
+
+        // 2. Se o status mudou para 'cancelado' -> Liberar horário e avisar cliente e barbeiro
+        if (targetStatus === 'cancelado' && agAnterior?.status !== 'cancelado') {
+          try {
+            await supabase.from('horario_disponivel')
+              .update({ disponivel: true })
+              .eq('profissional_id', data.profissional_id)
+              .eq('data', data.data)
+              .eq('horario', data.horario);
+          } catch (e) {
+            console.warn('[atualizarStatusAgendamento] Erro ao liberar slot:', e);
+          }
+
+          evolutionApi.sendAppointmentNotification('cancelamento', data).catch(err => {
+            console.warn('[WhatsApp] Aviso ao enviar cancelamento ao cliente:', err);
+          });
+
+          if (data.profissional_id) {
+            supabase.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle().then(({ data: prof }) => {
+              evolutionApi.notifyBarberCancellation(data, prof?.telefone).catch(err => {
+                console.warn('[WhatsApp] Aviso ao enviar cancelamento ao barbeiro:', err);
+              });
+            }).catch(() => {});
+          }
+        }
+
         return { data: { success: true, agendamento: data } };
       }
 

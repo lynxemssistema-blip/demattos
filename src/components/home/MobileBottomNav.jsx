@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { ShoppingBag, User, Home, Sparkles, Camera, Calendar, LogOut } from 'lucide-react';
+import { ShoppingBag, User, Home, Sparkles, Camera, Calendar, LogOut, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 
 const baseNavItems = [
@@ -12,7 +12,7 @@ const baseNavItems = [
 ];
 
 export default function MobileBottomNav() {
-  const { cliente, logout: authContextLogout } = useAuth();
+  const { cliente, isAdmin, logout: authContextLogout } = useAuth();
   const [aiCredits, setAiCredits] = useState(0);
   const [hasCredits, setHasCredits] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -77,12 +77,15 @@ export default function MobileBottomNav() {
   if (!isMobile || isAdminPage) return null;
 
   const logoutItem = { label: 'Sair', icon: LogOut, action: 'logout' };
+  const adminItem = { label: 'Admin', icon: ShieldCheck, action: 'page', to: createPageUrl('Admin'), highlight: true };
 
-  const navItems = hasCredits
-    ? [baseNavItems[0], baseNavItems[1], { action: 'ai' }, baseNavItems[2], baseNavItems[3]]
-    : cliente
-      ? [...baseNavItems, logoutItem]
-      : baseNavItems;
+  const navItems = isAdmin
+    ? [baseNavItems[0], baseNavItems[1], { action: 'ai' }, adminItem, baseNavItems[3]]
+    : hasCredits
+      ? [baseNavItems[0], baseNavItems[1], { action: 'ai' }, baseNavItems[2], baseNavItems[3]]
+      : cliente
+        ? [...baseNavItems, logoutItem]
+        : baseNavItems;
 
   return (
     <div
@@ -220,6 +223,15 @@ export default function MobileBottomNav() {
               <Icon size={20} />
               <span style={{ fontSize: '10px', fontWeight: '500' }}>{item.label}</span>
             </button>
+          );
+        }
+
+        if (item.highlight) {
+          return (
+            <Link key={item.label} to={item.to} style={{ ...commonStyle, color: '#D4AF37' }}>
+              <Icon size={20} color="#D4AF37" />
+              <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#D4AF37' }}>{item.label}</span>
+            </Link>
           );
         }
 

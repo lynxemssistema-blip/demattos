@@ -5,10 +5,40 @@ const DEFAULT_API_KEY = import.meta.env.VITE_EVOLUTION_API_KEY || 'F10230BCFE78-
 const DEFAULT_INSTANCE = import.meta.env.VITE_EVOLUTION_INSTANCE || 'DeMattos';
 export const LUAN_DEFAULT_PHONE = '5531973651924';
 
-export const DEFAULT_TEMPLATES = {
-  confirmacao: `💈 *Barbearia DeMattos* 💈
+/**
+ * Processa sintaxe Spintax {opcao1|opcao2|opcao3} para gerar variações dinâmicas de texto.
+ * Isso evita que mensagens idênticas sejam enviadas repetidamente, protegendo o número contra banimento da Meta.
+ */
+export function processSpintax(text) {
+  if (!text) return '';
+  const regex = /\{([^{}]+)\}/g;
+  let result = text;
+  let iterations = 0;
+  while (regex.test(result) && iterations < 10) {
+    iterations++;
+    result = result.replace(regex, (_, choices) => {
+      const options = choices.split('|');
+      const randomChoice = options[Math.floor(Math.random() * options.length)];
+      return randomChoice ? randomChoice.trim() : '';
+    });
+  }
+  return result;
+}
 
-Olá, *{{cliente_nome}}*! Seu agendamento foi confirmado com sucesso. ✅
+/**
+ * Retorna uma saudação humanizada dinâmica baseada no horário atual (Bom dia, Boa tarde, Boa noite).
+ */
+export function getSaudacaoPeriodo() {
+  const hora = new Date().getHours();
+  if (hora >= 5 && hora < 12) return 'Bom dia';
+  if (hora >= 12 && hora < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
+export const DEFAULT_TEMPLATES = {
+  confirmacao: `{💈 *Barbearia DeMattos* 💈|✂️ *DeMattos Visage* ✂️}
+
+{{saudacao_periodo}}, *{{cliente_nome}}*! {Seu agendamento foi confirmado com sucesso|Tudo pronto com o seu horário|Seu horário está 100% confirmado}. ✅
 
 ✂️ *Profissional:* {{barbeiro_nome}}
 🛠️ *Serviço:* {{servico}}
@@ -16,28 +46,52 @@ Olá, *{{cliente_nome}}*! Seu agendamento foi confirmado com sucesso. ✅
 ⏰ *Horário:* {{horario}}
 📍 *Endereço:* {{endereco}}
 
-Agradecemos a confiança! Caso precise remarcar, nos avise com antecedência.`,
+{Agradecemos a confiança e preferência!|Te esperamos no horário marcado!|Conte conosco para um atendimento impecável!} Caso precise remarcar, nos avise com antecedência por aqui.`,
 
-  cancelamento: `💈 *Barbearia DeMattos* 💈
+  cancelamento: `{💈 *Barbearia DeMattos* 💈|✂️ *DeMattos Visage* ✂️}
 
-Olá, *{{cliente_nome}}*! Informamos que o seu agendamento foi cancelado. ❌
+{{saudacao_periodo}}, *{{cliente_nome}}*! {Informamos que o seu agendamento foi cancelado|Confirmamos o cancelamento do seu agendamento}. ❌
 
 ✂️ *Profissional:* {{barbeiro_nome}}
 🛠️ *Serviço:* {{servico}}
 📅 *Data:* {{data}} às {{horario}}
 
-Caso deseje reagendar para outro dia ou horário, estamos à total disposição!`,
+{Caso deseje reagendar para outro dia ou horário, estamos à total disposição!|Quando quiser marcar um novo horário, acesse nosso site!} 💈`,
 
-  lembrete: `💈 *Lembrete de Horário - Barbearia DeMattos* 💈
+  lembrete: `{💈 *Lembrete de Horário - Barbearia DeMattos* 💈|⏰ *Lembrete de Atendimento - Barbearia DeMattos* ⏰}
 
-Olá, *{{cliente_nome}}*! Passando para lembrar do seu horário agendado:
+{{saudacao_periodo}}, *{{cliente_nome}}*! {Passando para lembrar do seu horário agendado|Lembrando você do seu atendimento|Não se esqueça do seu horário conosco}:
 
 ✂️ *Profissional:* {{barbeiro_nome}}
 🛠️ *Serviço:* {{servico}}
 ⏰ *Horário:* {{horario}} ({{data}})
 📍 *Endereço:* {{endereco}}
 
-Por favor, chegue com alguns minutos de antecedência. Te esperamos! ✂️🔥`
+{Por favor, chegue com alguns minutos de antecedência. Te esperamos!|Te esperamos no horário marcado! Qualquer imprevisto, nos avise por aqui.} ✂️🔥`,
+
+  aviso_barbeiro: `💈 *Novo Agendamento Recebido!* 💈
+
+{{saudacao_periodo}}, *{{barbeiro_nome}}*! Um novo agendamento acabou de ser realizado:
+
+👤 *Cliente:* {{cliente_nome}}
+📱 *Telefone:* {{cliente_telefone}}
+🛠️ *Serviço:* {{servico}}
+📅 *Data:* {{data}}
+⏰ *Horário:* {{horario}}
+💬 *Obs:* {{observacoes}}
+
+Acesse o painel para acompanhar sua agenda!`,
+
+  aviso_barbeiro_cancelamento: `💈 *Agendamento Cancelado* 💈
+
+{{saudacao_periodo}}, *{{barbeiro_nome}}*! O seguinte agendamento foi cancelado:
+
+👤 *Cliente:* {{cliente_nome}}
+📱 *Telefone:* {{cliente_telefone}}
+🛠️ *Serviço:* {{servico}}
+📅 *Data:* {{data}} às {{horario}}
+
+O horário foi liberado novamente na sua agenda.`
 };
 
 export const evolutionApi = {
@@ -180,6 +234,31 @@ export const evolutionApi = {
   },
 
   /**
+   * Envia presença no WhatsApp (ex: 'composing' para simular "digitando...", 'paused' para parar)
+   * Essencial para a Meta registrar atividade humana antes do disparo de mensagens automáticas.
+   */
+  async sendPresence(number, presence = 'composing', delay = 2500, instanceName = this.getInstanceName()) {
+    try {
+      let cleanNumber = (number || '').toString().replace(/\D/g, '');
+      if (!cleanNumber) return { success: false };
+      if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
+        cleanNumber = `55${cleanNumber}`;
+      }
+      const res = await this.request(`/chat/sendPresence/${instanceName}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          number: cleanNumber,
+          presence,
+          delay
+        })
+      });
+      return { success: res.ok, data: res.data };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  },
+
+  /**
    * Envia mensagem de texto direta
    */
   async sendTextMessage(number, text, instanceName = this.getInstanceName()) {
@@ -212,18 +291,90 @@ export const evolutionApi = {
   },
 
   /**
-   * Substitui placeholders no modelo de mensagem
+   * Envio inteligente com Proteção Anti-Ban Meta:
+   * 1. Verifica janela de horário permitido (evita denúncias de spam durante a noite).
+   * 2. Simula ação humana de digitação ("composing") no WhatsApp do destinatário.
+   * 3. Aplica delay humanizado com jitter aleatório para quebrar padrões repetitivos.
+   * 4. Dispara a mensagem com segurança máxima para preservar o número.
    */
-  formatTemplate(template, data = {}) {
+  async sendHumanizedTextMessage(number, text, settingsOverride = null, instanceName = this.getInstanceName()) {
+    try {
+      const settings = settingsOverride || await this.getWhatsAppSettings();
+
+      // 1. Verificação da Janela de Silêncio Noturno (Anti-Denúncia)
+      if (settings.antiban_janela_ativa) {
+        const now = new Date();
+        const currentHours = now.getHours();
+        const currentMinutes = now.getMinutes();
+        const currentTotalMin = currentHours * 60 + currentMinutes;
+
+        const [iniH, iniM] = (settings.antiban_janela_inicio || '08:00').split(':').map(Number);
+        const [fimH, fimM] = (settings.antiban_janela_fim || '21:30').split(':').map(Number);
+        const inicioTotalMin = (iniH || 8) * 60 + (iniM || 0);
+        const fimTotalMin = (fimH || 21) * 60 + (fimM || 30);
+
+        if (currentTotalMin < inicioTotalMin || currentTotalMin > fimTotalMin) {
+          console.warn(`[Anti-Ban] Envio cancelado fora da janela permitida (${settings.antiban_janela_inicio} às ${settings.antiban_janela_fim}). Hora atual: ${now.toLocaleTimeString()}`);
+          return {
+            success: false,
+            skipped: true,
+            reason: `Fora da janela de horário permitida (${settings.antiban_janela_inicio} às ${settings.antiban_janela_fim}) para proteger o número contra denúncias de spam.`
+          };
+        }
+      }
+
+      // 2. Simular Digitação ("composing") se ativado
+      if (settings.antiban_simular_digitando) {
+        try {
+          await this.sendPresence(number, 'composing', 2000, instanceName);
+          const typingWait = Math.floor(Math.random() * 1200) + 1800; // 1.8s a 3s
+          await new Promise(r => setTimeout(r, typingWait));
+        } catch (ePresence) {
+          // Continua mesmo se o status presence falhar
+        }
+      }
+
+      // 3. Delay com Jitter aleatório para quebrar padrões da Meta
+      const minSec = Math.max(1, settings.antiban_delay_min || 3);
+      const maxSec = Math.max(minSec, settings.antiban_delay_max || 8);
+      const randomDelayMs = Math.floor(Math.random() * ((maxSec - minSec) * 1000 + 1)) + (minSec * 1000);
+      if (randomDelayMs > 0) {
+        await new Promise(r => setTimeout(r, randomDelayMs));
+      }
+
+      // 4. Envio oficial
+      return await this.sendTextMessage(number, text, instanceName);
+    } catch (error) {
+      console.error('[Anti-Ban] Erro no envio humanizado, usando envio padrão:', error);
+      return await this.sendTextMessage(number, text, instanceName);
+    }
+  },
+
+  /**
+   * Substitui placeholders no modelo de mensagem e aplica variações Spintax
+   */
+  formatTemplate(template, data = {}, applySpintax = true) {
     if (!template) return '';
-    return template
+    const primeiroNome = (data.cliente_nome || 'Cliente').trim().split(' ')[0];
+    const saudacao = getSaudacaoPeriodo();
+
+    let text = template
+      .replace(/\{\{\s*saudacao_periodo\s*\}\}/gi, saudacao)
+      .replace(/\{\{\s*cliente_primeiro_nome\s*\}\}/gi, primeiroNome)
       .replace(/\{\{\s*cliente_nome\s*\}\}/gi, data.cliente_nome || 'Cliente')
+      .replace(/\{\{\s*cliente_telefone\s*\}\}/gi, data.cliente_telefone || data.phone || '')
       .replace(/\{\{\s*barbeiro_nome\s*\}\}/gi, data.barbeiro_nome || data.profissional_nome || 'Luan')
       .replace(/\{\{\s*servico\s*\}\}/gi, data.servico || 'Corte e Barba')
       .replace(/\{\{\s*data\s*\}\}/gi, data.data || '')
       .replace(/\{\{\s*horario\s*\}\}/gi, data.horario || '')
       .replace(/\{\{\s*endereco\s*\}\}/gi, data.endereco || 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem')
-      .replace(/\{\{\s*telefone_barbearia\s*\}\}/gi, data.telefone_barbearia || '(31) 97365-1924');
+      .replace(/\{\{\s*telefone_barbearia\s*\}\}/gi, data.telefone_barbearia || '(31) 97365-1924')
+      .replace(/\{\{\s*observacoes\s*\}\}/gi, data.observacoes || data.message || 'Nenhuma');
+
+    if (applySpintax) {
+      text = processSpintax(text);
+    }
+    return text;
   },
 
   /**
@@ -241,15 +392,38 @@ export const evolutionApi = {
       });
 
       return {
+        // Modos e Destinatários
         modo_operacao: map.whatsapp_modo_operacao || 'teste', // 'teste' ou 'oficial'
         numero_teste_luan: map.whatsapp_numero_teste_luan || LUAN_DEFAULT_PHONE,
+
+        // Ativação dos Disparos
         confirmacao_ativa: map.whatsapp_confirmacao_ativo !== 'false',
         cancelamento_ativo: map.whatsapp_cancelamento_ativo !== 'false',
         lembrete_ativo: map.whatsapp_lembrete_ativo !== 'false',
-        lembrete_timing: map.whatsapp_lembrete_timing || '3_horas_antes', // '1_dia_antes', '3_horas_antes', '2_horas_antes', '1_hora_antes', 'no_dia_cedo'
+        notificar_barbeiro_ativo: map.whatsapp_notificar_barbeiro_ativo !== 'false',
+
+        // Parâmetros de Lembretes & Confirmação
+        lembrete_timing: map.whatsapp_lembrete_timing || '1_dia_antes_noite', // '1_dia_antes_noite', '1_dia_antes_24h', '3_horas_antes', '2_horas_antes', '1_hora_antes', 'no_dia_cedo'
+        segundo_lembrete_ativo: map.whatsapp_segundo_lembrete_ativo === 'true',
+        segundo_lembrete_timing: map.whatsapp_segundo_lembrete_timing || '2_horas_antes',
+        confirmacao_delay_modo: map.whatsapp_confirmacao_delay_modo || 'instantaneo', // 'instantaneo' ou 'delay_1_min'
+
+        // Parâmetros de Proteção Anti-Ban Meta
+        antiban_simular_digitando: map.whatsapp_antiban_simular_digitando !== 'false',
+        antiban_spintax_ativo: map.whatsapp_antiban_spintax_ativo !== 'false',
+        antiban_delay_min: Number(map.whatsapp_antiban_delay_min) || 3,
+        antiban_delay_max: Number(map.whatsapp_antiban_delay_max) || 8,
+        antiban_janela_ativa: map.whatsapp_antiban_janela_ativa !== 'false',
+        antiban_janela_inicio: map.whatsapp_antiban_janela_inicio || '08:00',
+        antiban_janela_fim: map.whatsapp_antiban_janela_fim || '21:30',
+        antiban_limite_hora: Number(map.whatsapp_antiban_limite_hora) || 30,
+        antiban_rodape_optout: map.whatsapp_antiban_rodape_optout !== 'false',
+
+        // Modelos de Mensagens
         template_confirmacao: map.whatsapp_template_confirmacao || DEFAULT_TEMPLATES.confirmacao,
         template_cancelamento: map.whatsapp_template_cancelamento || DEFAULT_TEMPLATES.cancelamento,
         template_lembrete: map.whatsapp_template_lembrete || DEFAULT_TEMPLATES.lembrete,
+        template_aviso_barbeiro: map.whatsapp_template_aviso_barbeiro || DEFAULT_TEMPLATES.aviso_barbeiro,
       };
     } catch (e) {
       console.error('Erro ao carregar configurações de WhatsApp:', e);
@@ -259,10 +433,24 @@ export const evolutionApi = {
         confirmacao_ativa: true,
         cancelamento_ativo: true,
         lembrete_ativo: true,
-        lembrete_timing: '3_horas_antes',
+        notificar_barbeiro_ativo: true,
+        lembrete_timing: '1_dia_antes_noite',
+        segundo_lembrete_ativo: false,
+        segundo_lembrete_timing: '2_horas_antes',
+        confirmacao_delay_modo: 'instantaneo',
+        antiban_simular_digitando: true,
+        antiban_spintax_ativo: true,
+        antiban_delay_min: 3,
+        antiban_delay_max: 8,
+        antiban_janela_ativa: true,
+        antiban_janela_inicio: '08:00',
+        antiban_janela_fim: '21:30',
+        antiban_limite_hora: 30,
+        antiban_rodape_optout: true,
         template_confirmacao: DEFAULT_TEMPLATES.confirmacao,
         template_cancelamento: DEFAULT_TEMPLATES.cancelamento,
         template_lembrete: DEFAULT_TEMPLATES.lembrete,
+        template_aviso_barbeiro: DEFAULT_TEMPLATES.aviso_barbeiro,
       };
     }
   },
@@ -278,10 +466,24 @@ export const evolutionApi = {
         { chave: 'whatsapp_confirmacao_ativo', valor: String(settings.confirmacao_ativa), descricao: 'Disparo de confirmação ativo' },
         { chave: 'whatsapp_cancelamento_ativo', valor: String(settings.cancelamento_ativo), descricao: 'Disparo de cancelamento ativo' },
         { chave: 'whatsapp_lembrete_ativo', valor: String(settings.lembrete_ativo), descricao: 'Disparo de lembrete ativo' },
-        { chave: 'whatsapp_lembrete_timing', valor: settings.lembrete_timing, descricao: 'Momento de envio do lembrete' },
+        { chave: 'whatsapp_notificar_barbeiro_ativo', valor: String(settings.notificar_barbeiro_ativo), descricao: 'Disparo de aviso ao barbeiro ativo' },
+        { chave: 'whatsapp_lembrete_timing', valor: settings.lembrete_timing, descricao: 'Momento de envio do lembrete principal' },
+        { chave: 'whatsapp_segundo_lembrete_ativo', valor: String(settings.segundo_lembrete_ativo), descricao: 'Disparo de segundo lembrete ativo' },
+        { chave: 'whatsapp_segundo_lembrete_timing', valor: settings.segundo_lembrete_timing, descricao: 'Momento de envio do segundo lembrete' },
+        { chave: 'whatsapp_confirmacao_delay_modo', valor: settings.confirmacao_delay_modo, descricao: 'Modo de delay para confirmação' },
+        { chave: 'whatsapp_antiban_simular_digitando', valor: String(settings.antiban_simular_digitando), descricao: 'Anti-Ban: Simular digitando' },
+        { chave: 'whatsapp_antiban_spintax_ativo', valor: String(settings.antiban_spintax_ativo), descricao: 'Anti-Ban: Variações Spintax ativas' },
+        { chave: 'whatsapp_antiban_delay_min', valor: String(settings.antiban_delay_min), descricao: 'Anti-Ban: Delay mínimo em segundos' },
+        { chave: 'whatsapp_antiban_delay_max', valor: String(settings.antiban_delay_max), descricao: 'Anti-Ban: Delay máximo em segundos' },
+        { chave: 'whatsapp_antiban_janela_ativa', valor: String(settings.antiban_janela_ativa), descricao: 'Anti-Ban: Janela de envio permitida ativa' },
+        { chave: 'whatsapp_antiban_janela_inicio', valor: settings.antiban_janela_inicio, descricao: 'Anti-Ban: Início da janela de envio' },
+        { chave: 'whatsapp_antiban_janela_fim', valor: settings.antiban_janela_fim, descricao: 'Anti-Ban: Fim da janela de envio' },
+        { chave: 'whatsapp_antiban_limite_hora', valor: String(settings.antiban_limite_hora), descricao: 'Anti-Ban: Limite de mensagens por hora' },
+        { chave: 'whatsapp_antiban_rodape_optout', valor: String(settings.antiban_rodape_optout), descricao: 'Anti-Ban: Rodapé de remarcação e opt-out cortês' },
         { chave: 'whatsapp_template_confirmacao', valor: settings.template_confirmacao, descricao: 'Modelo de mensagem de confirmação' },
         { chave: 'whatsapp_template_cancelamento', valor: settings.template_cancelamento, descricao: 'Modelo de mensagem de cancelamento' },
         { chave: 'whatsapp_template_lembrete', valor: settings.template_lembrete, descricao: 'Modelo de mensagem de lembrete' },
+        { chave: 'whatsapp_template_aviso_barbeiro', valor: settings.template_aviso_barbeiro, descricao: 'Modelo de mensagem de aviso ao barbeiro' },
       ];
 
       for (const item of items) {
@@ -292,13 +494,13 @@ export const evolutionApi = {
 
       return { success: true };
     } catch (error) {
-      console.error('Erro ao salvar modelos de WhatsApp:', error);
+      console.error('Erro ao salvar modelos e regras de WhatsApp:', error);
       return { success: false, error: error.message };
     }
   },
 
   /**
-   * Dispara notificação automática de agendamento respeitando modo oficial vs teste
+   * Dispara notificação automática de agendamento respeitando modo oficial vs teste e Anti-Ban
    * @param {'confirmacao'|'cancelamento'|'lembrete'} tipo
    * @param {Object} agendamentoData
    */
@@ -316,7 +518,7 @@ export const evolutionApi = {
       if (tipo === 'cancelamento') template = settings.template_cancelamento;
       if (tipo === 'lembrete') template = settings.template_lembrete;
 
-      let formattedText = this.formatTemplate(template, agendamentoData);
+      let formattedText = this.formatTemplate(template, agendamentoData, settings.antiban_spintax_ativo);
 
       let targetNumber = agendamentoData.cliente_telefone;
 
@@ -326,10 +528,11 @@ export const evolutionApi = {
         formattedText = `🧪 *[MODO DE TESTE - Destinado a: ${agendamentoData.cliente_nome || 'Cliente'} (${agendamentoData.cliente_telefone || 'Sem número'})]*\n\n${formattedText}`;
         console.log(`[WhatsApp] Disparando em MODO TESTE exclusivamente para o Barbeiro Luan (${targetNumber})`);
       } else {
-        console.log(`[WhatsApp] Disparando em MODO OFICIAL para o cliente (${targetNumber})`);
+        console.log(`[WhatsApp] Disparando em MODO OFICIAL com Proteção Anti-Ban para (${targetNumber})`);
       }
 
-      const res = await this.sendTextMessage(targetNumber, formattedText);
+      // Envio humanizado (digitando + jitter + janela de horário)
+      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings);
 
       // Registrar histórico em conversa_whatsapp se possível
       try {
@@ -351,6 +554,103 @@ export const evolutionApi = {
       return res;
     } catch (e) {
       console.error('[WhatsApp] Erro ao disparar notificação:', e);
+      return { success: false, error: e.message };
+    }
+  },
+
+  /**
+   * Notifica o barbeiro sobre um novo agendamento realizado
+   * @param {Object} agendamentoData
+   * @param {string|null} profissionalTelefone
+   */
+  async notifyBarberNewAppointment(agendamentoData, profissionalTelefone = null) {
+    try {
+      const settings = await this.getWhatsAppSettings();
+      if (!settings.notificar_barbeiro_ativo) {
+        return { skipped: true, reason: 'Notificação ao barbeiro desativada' };
+      }
+
+      let template = settings.template_aviso_barbeiro || DEFAULT_TEMPLATES.aviso_barbeiro;
+      let formattedText = this.formatTemplate(template, agendamentoData, settings.antiban_spintax_ativo);
+
+      let targetNumber = profissionalTelefone || settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
+
+      if (settings.modo_operacao === 'teste') {
+        targetNumber = settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
+        formattedText = `🧪 *[MODO DE TESTE - AVISO AO BARBEIRO]*\n\n${formattedText}`;
+        console.log(`[WhatsApp] Disparando aviso ao barbeiro em MODO TESTE para (${targetNumber})`);
+      } else {
+        console.log(`[WhatsApp] Disparando aviso ao barbeiro em MODO OFICIAL para (${targetNumber})`);
+      }
+
+      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings);
+
+      try {
+        await supabase.from('conversa_whatsapp').insert({
+          telefone_cliente: targetNumber,
+          role: 'assistant',
+          mensagem: formattedText,
+          dados_extraidos: {
+            tipo: 'aviso_barbeiro_novo',
+            agendamento_id: agendamentoData.id || null,
+            modo_operacao: settings.modo_operacao,
+            cliente_nome: agendamentoData.cliente_nome
+          }
+        });
+      } catch (errDb) {
+        // Ignora erro secundário
+      }
+
+      return res;
+    } catch (e) {
+      console.error('[WhatsApp] Erro ao notificar barbeiro de novo agendamento:', e);
+      return { success: false, error: e.message };
+    }
+  },
+
+  /**
+   * Notifica o barbeiro sobre cancelamento de agendamento
+   * @param {Object} agendamentoData
+   * @param {string|null} profissionalTelefone
+   */
+  async notifyBarberCancellation(agendamentoData, profissionalTelefone = null) {
+    try {
+      const settings = await this.getWhatsAppSettings();
+      if (!settings.notificar_barbeiro_ativo) {
+        return { skipped: true, reason: 'Notificação ao barbeiro desativada' };
+      }
+
+      let template = DEFAULT_TEMPLATES.aviso_barbeiro_cancelamento;
+      let formattedText = this.formatTemplate(template, agendamentoData, settings.antiban_spintax_ativo);
+
+      let targetNumber = profissionalTelefone || settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
+
+      if (settings.modo_operacao === 'teste') {
+        targetNumber = settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
+        formattedText = `🧪 *[MODO DE TESTE - CANCELAMENTO AO BARBEIRO]*\n\n${formattedText}`;
+      }
+
+      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings);
+
+      try {
+        await supabase.from('conversa_whatsapp').insert({
+          telefone_cliente: targetNumber,
+          role: 'assistant',
+          mensagem: formattedText,
+          dados_extraidos: {
+            tipo: 'aviso_barbeiro_cancelamento',
+            agendamento_id: agendamentoData.id || null,
+            modo_operacao: settings.modo_operacao,
+            cliente_nome: agendamentoData.cliente_nome
+          }
+        });
+      } catch (errDb) {
+        // Ignora erro secundário
+      }
+
+      return res;
+    } catch (e) {
+      console.error('[WhatsApp] Erro ao notificar cancelamento ao barbeiro:', e);
       return { success: false, error: e.message };
     }
   }

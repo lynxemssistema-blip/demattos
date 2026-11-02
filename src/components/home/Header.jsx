@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, X, ShoppingCart, User, LogIn, LogOut } from 'lucide-react';
+import { Menu, X, ShoppingCart, User, LogIn, LogOut, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
@@ -23,7 +23,7 @@ const navItems = [
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, cliente, logout: authContextLogout } = useAuth();
+  const { user, cliente, isAdmin, logout: authContextLogout } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -158,10 +158,20 @@ export default function Header() {
               
               {user ? (
                 <>
+                  {isAdmin && (
+                    <Link to={createPageUrl('Admin')}>
+                      <Button
+                        className="bg-[#D4AF37] hover:bg-[#B8973D] text-black font-bold px-4 tracking-wide shadow-md shadow-[#D4AF37]/20 flex items-center gap-1.5"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        PAINEL ADMIN
+                      </Button>
+                    </Link>
+                  )}
                   <Link to={createPageUrl('CanalCliente')}>
                     <Button
                       variant="outline"
-                      className="border-[#D4AF37] text-[#D4AF37] hover:bg-[#D4AF37]/10 font-semibold px-6 tracking-wide"
+                      className="border-[#D4AF37] text-[#D4AF37] hover:bg-[#D4AF37]/10 font-semibold px-4 tracking-wide"
                     >
                       <User className="w-4 h-4 mr-2" />
                       MEU CANAL
@@ -169,9 +179,10 @@ export default function Header() {
                   </Link>
                   <Button
                     onClick={handleLogout}
-                    className="bg-[#D4AF37] hover:bg-[#B8973D] text-black font-semibold px-6 tracking-wide"
+                    variant="ghost"
+                    className="text-gray-400 hover:text-white hover:bg-white/10 font-semibold px-3 tracking-wide"
                   >
-                    <LogOut className="w-4 h-4 mr-2" />
+                    <LogOut className="w-4 h-4 mr-1" />
                     SAIR
                   </Button>
                 </>
@@ -287,9 +298,21 @@ export default function Header() {
                 ))}
                 {user ? (
                   <>
+                    {isAdmin && (
+                      <Link to={createPageUrl('Admin')}>
+                        <Button
+                          className="bg-[#D4AF37] hover:bg-[#B8973D] text-black font-bold mt-4 w-full flex items-center justify-center gap-2 py-5 shadow-lg shadow-[#D4AF37]/20"
+                          onClick={() => setMobileOpen(false)}
+                        >
+                          <ShieldCheck className="w-5 h-5" />
+                          PAINEL ADMINISTRATIVO
+                        </Button>
+                      </Link>
+                    )}
                     <Link to={createPageUrl('CanalCliente')}>
                       <Button
-                        className="bg-[#D4AF37] hover:bg-[#B8973D] text-black font-semibold mt-4 w-full"
+                        variant={isAdmin ? "outline" : "default"}
+                        className={`${isAdmin ? 'border-[#D4AF37] text-[#D4AF37] hover:bg-[#D4AF37]/10' : 'bg-[#D4AF37] hover:bg-[#B8973D] text-black'} font-semibold mt-2 w-full`}
                         onClick={() => setMobileOpen(false)}
                       >
                         <User className="w-4 h-4 mr-2" />
@@ -298,8 +321,8 @@ export default function Header() {
                     </Link>
                     <Button
                       onClick={handleLogout}
-                      variant="outline"
-                      className="border-[#D4AF37] text-[#D4AF37] hover:bg-[#D4AF37]/10 font-semibold mt-2 w-full"
+                      variant="ghost"
+                      className="text-gray-400 hover:text-white hover:bg-white/10 font-semibold mt-2 w-full"
                     >
                       <LogOut className="w-4 h-4 mr-2" />
                       SAIR

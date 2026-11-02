@@ -29,6 +29,8 @@ import {
   LogOut,
   Power,
   ShieldCheck,
+  ShieldAlert,
+  Shield,
   PhoneCall,
   Loader2,
   ExternalLink,
@@ -39,7 +41,17 @@ import {
   Calendar,
   Info,
   Server,
-  Hash
+  Hash,
+  Bell,
+  Sliders,
+  Shuffle,
+  Sun,
+  Moon,
+  Zap,
+  Check,
+  Activity,
+  Flame,
+  CheckCheck
 } from 'lucide-react';
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
@@ -52,18 +64,41 @@ function AdminWhatsAppContent() {
   const [loadingQr, setLoadingQr] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [countdown, setCountdown] = useState(40);
+  const [previewSeed, setPreviewSeed] = useState(0);
 
-  // Configurações & Templates
+  // Configurações & Templates com parâmetros de Automação e Anti-Ban
   const [settings, setSettings] = useState({
     modo_operacao: 'teste', // 'teste' ou 'oficial'
     numero_teste_luan: LUAN_DEFAULT_PHONE,
+
+    // Disparos Ativos
     confirmacao_ativa: true,
     cancelamento_ativo: true,
     lembrete_ativo: true,
-    lembrete_timing: '3_horas_antes',
+    notificar_barbeiro_ativo: true,
+
+    // Parâmetros de Automação & Lembretes
+    lembrete_timing: '1_dia_antes_noite',
+    segundo_lembrete_ativo: false,
+    segundo_lembrete_timing: '2_horas_antes',
+    confirmacao_delay_modo: 'instantaneo',
+
+    // Parâmetros Anti-Ban Meta
+    antiban_simular_digitando: true,
+    antiban_spintax_ativo: true,
+    antiban_delay_min: 3,
+    antiban_delay_max: 8,
+    antiban_janela_ativa: true,
+    antiban_janela_inicio: '08:00',
+    antiban_janela_fim: '21:30',
+    antiban_limite_hora: 30,
+    antiban_rodape_optout: true,
+
+    // Modelos
     template_confirmacao: DEFAULT_TEMPLATES.confirmacao,
     template_cancelamento: DEFAULT_TEMPLATES.cancelamento,
     template_lembrete: DEFAULT_TEMPLATES.lembrete,
+    template_aviso_barbeiro: DEFAULT_TEMPLATES.aviso_barbeiro,
   });
 
   const [savingSettings, setSavingSettings] = useState(false);
@@ -110,34 +145,31 @@ function AdminWhatsAppContent() {
 
   const loadSettings = async () => {
     const data = await evolutionApi.getWhatsAppSettings();
-    setSettings(data);
-    setTestNumber(data.numero_teste_luan || LUAN_DEFAULT_PHONE);
+    if (data) {
+      setSettings(data);
+    }
   };
 
-  const loadStatusAndDetails = async (fetchQrIfDisconnected = false) => {
+  const loadStatusAndDetails = async (initial = false) => {
+    if (initial) setLoadingQr(true);
     try {
       const stateRes = await evolutionApi.getConnectionState();
-      const currentState = stateRes.state;
-      setConnectionState(currentState);
+      setConnectionState(stateRes.state);
+      prevStateRef.current = stateRes.state;
 
-      const detailsRes = await evolutionApi.getInstanceDetails();
-      if (detailsRes.success && detailsRes.instance) {
-        setInstanceDetails(detailsRes.instance);
-      }
-
-      if (currentState === 'open') {
-        setQrCodeBase64(null);
-        if (prevStateRef.current && prevStateRef.current !== 'open') {
-          confetti({ particleCount: 80, spread: 60 });
-          toast.success('WhatsApp conectado com sucesso!');
+      if (stateRes.state === 'open') {
+        const detailsRes = await evolutionApi.getInstanceDetails();
+        if (detailsRes.success) {
+          setInstanceDetails(detailsRes.instance);
         }
-      } else if (fetchQrIfDisconnected) {
+        setQrCodeBase64(null);
+      } else {
         await handleRefreshQrCode();
       }
-
-      prevStateRef.current = currentState;
     } catch (e) {
-      console.error('Erro ao verificar status:', e);
+      console.error('Erro ao carregar status:', e);
+    } finally {
+      if (initial) setLoadingQr(false);
     }
   };
 
@@ -146,22 +178,25 @@ function AdminWhatsAppContent() {
       const stateRes = await evolutionApi.getConnectionState();
       const newState = stateRes.state;
 
-      if (newState !== prevStateRef.current) {
-        setConnectionState(newState);
-
-        if (newState === 'open') {
-          setQrCodeBase64(null);
-          confetti({ particleCount: 100, spread: 70 });
-          toast.success('WhatsApp conectado com sucesso!');
-          const detailsRes = await evolutionApi.getInstanceDetails();
-          if (detailsRes.success) setInstanceDetails(detailsRes.instance);
+      if (prevStateRef.current !== 'open' && newState === 'open') {
+        toast.success('WhatsApp conectado com sucesso!');
+        try {
+          confetti({
+            particleCount: 80,
+            spread: 60,
+            origin: { y: 0.6 }
+          });
+        } catch (e) {}
+        const detailsRes = await evolutionApi.getInstanceDetails();
+        if (detailsRes.success) {
+          setInstanceDetails(detailsRes.instance);
         }
-
-        prevStateRef.current = newState;
+        setQrCodeBase64(null);
       }
-    } catch (e) {
-      // Ignora erro em polling silencioso
-    }
+
+      setConnectionState(newState);
+      prevStateRef.current = newState;
+    } catch (e) {}
   };
 
   const handleRefreshQrCode = async () => {
@@ -234,7 +269,7 @@ function AdminWhatsAppContent() {
     try {
       const res = await evolutionApi.saveWhatsAppSettings(settings);
       if (res.success) {
-        toast.success('Configurações e modelos de WhatsApp salvos com sucesso!');
+        toast.success('Todas as configurações, modelos e regras anti-ban foram salvas com sucesso!');
       } else {
         toast.error('Erro ao salvar configurações.');
       }
@@ -249,6 +284,7 @@ function AdminWhatsAppContent() {
     let field = 'template_confirmacao';
     if (activeTemplateTab === 'cancelamento') field = 'template_cancelamento';
     if (activeTemplateTab === 'lembrete') field = 'template_lembrete';
+    if (activeTemplateTab === 'aviso_barbeiro') field = 'template_aviso_barbeiro';
 
     setSettings((prev) => ({
       ...prev,
@@ -282,25 +318,27 @@ function AdminWhatsAppContent() {
     setSendingTest(true);
     try {
       const sampleData = {
-        cliente_nome: 'Cliente Exemplo',
+        cliente_nome: 'Carlos Silva',
+        cliente_telefone: '(31) 98765-4321',
         barbeiro_nome: 'Luan',
         servico: 'Corte + Barba Visagista',
         data: new Date().toLocaleDateString('pt-BR'),
         horario: '15:30',
         endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem',
-        telefone_barbearia: '(31) 97365-1924'
+        telefone_barbearia: '(31) 97365-1924',
+        observacoes: 'Degradê na zero e barba alinhada'
       };
 
-      let text = evolutionApi.formatTemplate(settings[`template_${tipo}`], sampleData);
+      let text = evolutionApi.formatTemplate(settings[`template_${tipo}`], sampleData, settings.antiban_spintax_ativo);
       if (settings.modo_operacao === 'teste') {
         text = `🧪 *[TESTE MANUAL - MODELO ${tipo.toUpperCase()}]*\n\n${text}`;
       }
 
-      const res = await evolutionApi.sendTextMessage(targetNumber, text);
+      const res = await evolutionApi.sendHumanizedTextMessage(targetNumber, text, settings);
       if (res.success) {
         toast.success(`Mensagem de teste enviada com sucesso para ${targetNumber}!`);
       } else {
-        toast.error('Falha no envio da mensagem. Verifique se o número possui WhatsApp ativo.');
+        toast.error('Falha no envio da mensagem: ' + (res.error || res.reason || 'Verifique o número'));
       }
     } catch (e) {
       toast.error('Erro ao enviar teste: ' + e.message);
@@ -309,26 +347,42 @@ function AdminWhatsAppContent() {
     }
   };
 
-  // Preview dinâmico para renderizar balão do WhatsApp
+  // Preview dinâmico para renderizar balão do WhatsApp com Spintax resolvido
   const getActivePreviewText = () => {
     const sampleData = {
       cliente_nome: 'Carlos Silva',
+      cliente_telefone: '(31) 98765-4321',
       barbeiro_nome: 'Luan',
       servico: 'Corte Premium & Barba',
-      data: '28/10/2026',
+      data: '03/11/2026',
       horario: '16:00',
       endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras',
-      telefone_barbearia: '(31) 97365-1924'
+      telefone_barbearia: '(31) 97365-1924',
+      observacoes: 'Degradê na zero e barba alinhada'
     };
 
     const currentTemplate = settings[`template_${activeTemplateTab}`] || '';
-    let formatted = evolutionApi.formatTemplate(currentTemplate, sampleData);
+    let formatted = evolutionApi.formatTemplate(currentTemplate, sampleData, settings.antiban_spintax_ativo);
 
     if (settings.modo_operacao === 'teste') {
-      formatted = `🧪 *[MODO DE TESTE - Destinado a: Carlos Silva]*\n\n${formatted}`;
+      const destinatario = activeTemplateTab === 'aviso_barbeiro' ? 'Barbeiro Luan' : 'Carlos Silva';
+      formatted = `🧪 *[MODO DE TESTE - Destinado a: ${destinatario}]*\n\n${formatted}`;
     }
     return formatted;
   };
+
+  // Pontuação de Saúde e Proteção Anti-Ban Meta (0 a 100%)
+  const calculateHealthScore = () => {
+    let score = 0;
+    if (settings.antiban_simular_digitando) score += 25;
+    if (settings.antiban_spintax_ativo) score += 25;
+    if (settings.antiban_janela_ativa) score += 25;
+    if (settings.antiban_delay_min >= 2) score += 15;
+    if (settings.antiban_rodape_optout) score += 10;
+    return Math.min(100, score);
+  };
+
+  const healthScore = calculateHealthScore();
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white p-4 sm:p-6 lg:p-8">
@@ -454,20 +508,32 @@ function AdminWhatsAppContent() {
           </CardContent>
         </Card>
 
-        {/* Abas Principais: Conexão vs Templates */}
+        {/* Abas Principais do Hub WhatsApp */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-[#141414] border border-[#222] p-1 h-auto grid grid-cols-2 max-w-md">
+          <TabsList className="bg-[#141414] border border-[#222] p-1.5 h-auto grid grid-cols-2 md:grid-cols-4 max-w-3xl gap-1">
             <TabsTrigger
               value="conexao"
-              className="py-2.5 text-xs sm:text-sm data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center gap-2"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
             >
               <Smartphone className="w-4 h-4" /> Conexão & QR Code
             </TabsTrigger>
             <TabsTrigger
               value="templates"
-              className="py-2.5 text-xs sm:text-sm data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center gap-2"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
             >
-              <MessageSquare className="w-4 h-4" /> Modelos & Lembretes
+              <MessageSquare className="w-4 h-4" /> Modelos & Spintax
+            </TabsTrigger>
+            <TabsTrigger
+              value="regras"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
+            >
+              <Clock className="w-4 h-4" /> Parâmetros de Disparo
+            </TabsTrigger>
+            <TabsTrigger
+              value="antiban"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
+            >
+              <ShieldCheck className="w-4 h-4" /> Proteção Anti-Ban Meta
             </TabsTrigger>
           </TabsList>
 
@@ -504,18 +570,18 @@ function AdminWhatsAppContent() {
 
                     <div className="space-y-1 text-center sm:text-left flex-1">
                       <h3 className="text-lg font-semibold text-white">
-                        {instanceDetails?.profileName || 'Barbearia DeMattos'}
+                        {instanceDetails?.profileName || 'Demattos Visage'}
                       </h3>
                       <p className="text-sm text-gray-400 flex items-center justify-center sm:justify-start gap-1.5">
                         <PhoneCall className="w-4 h-4 text-[#D4AF37]" />
-                        {instanceDetails?.number ? `+${instanceDetails.number}` : 'Número conectado'}
+                        {instanceDetails?.number ? `+${instanceDetails.number}` : '(31) 97365-1924'}
                       </p>
                       <div className="flex flex-wrap gap-2 pt-2 justify-center sm:justify-start">
                         <Badge variant="outline" className="text-xs border-[#333] text-gray-300">
                           Instância: {instanceDetails?.name || 'DeMattos'}
                         </Badge>
                         <Badge variant="outline" className="text-xs border-[#333] text-gray-300">
-                          Mensagens: {instanceDetails?._count?.Message || '0'}
+                          Mensagens Entregues: {instanceDetails?._count?.Message || '0'}
                         </Badge>
                         <Badge variant="outline" className="text-xs border-[#333] text-gray-300">
                           Contatos: {instanceDetails?._count?.Contact || '0'}
@@ -539,7 +605,7 @@ function AdminWhatsAppContent() {
                         size="sm"
                         onClick={handleDisconnect}
                         disabled={loadingAction}
-                        className="bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-200"
+                        className="bg-red-950 hover:bg-red-900 border border-red-800 text-red-200"
                       >
                         <LogOut className="w-4 h-4 mr-1.5" />
                         Desconectar
@@ -549,223 +615,39 @@ function AdminWhatsAppContent() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Box QR Code */}
-                <Card className="lg:col-span-7 bg-[#141414] border-[#222] shadow-xl">
-                  <CardHeader className="border-b border-[#222] pb-4">
-                    <CardTitle className="text-lg text-white flex items-center gap-2">
-                      <QrCode className="w-5 h-5 text-[#D4AF37]" /> Escanear QR Code
-                    </CardTitle>
-                    <CardDescription className="text-gray-400">
-                      Aponte a câmera do WhatsApp para a imagem abaixo.
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="pt-6 flex flex-col items-center justify-center space-y-4">
-                    <div className="relative p-4 bg-white rounded-2xl shadow-2xl flex items-center justify-center min-w-[280px] min-h-[280px]">
-                      {loadingQr ? (
-                        <div className="flex flex-col items-center justify-center p-8 text-black">
-                          <Loader2 className="w-10 h-10 animate-spin text-[#D4AF37] mb-3" />
-                          <p className="text-xs font-semibold text-gray-600">Gerando novo QR Code...</p>
-                        </div>
-                      ) : qrCodeBase64 ? (
-                        <img
-                          src={qrCodeBase64.startsWith('data:') ? qrCodeBase64 : `data:image/png;base64,${qrCodeBase64}`}
-                          alt="QR Code WhatsApp"
-                          className="w-64 h-64 sm:w-72 sm:h-72 object-contain"
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center p-8 text-black text-center">
-                          <AlertTriangle className="w-10 h-10 text-amber-500 mb-2" />
-                          <p className="text-xs font-semibold text-gray-700">QR Code expirado ou indisponível</p>
-                          <Button
-                            size="sm"
-                            onClick={handleRefreshQrCode}
-                            className="mt-3 bg-[#D4AF37] hover:bg-[#b89730] text-black font-semibold"
-                          >
-                            Gerar QR Code
-                          </Button>
-                        </div>
-                      )}
+              <Card className="bg-[#141414] border-[#222]">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <QrCode className="w-5 h-5 text-[#D4AF37]" /> Conectar WhatsApp via QR Code
+                  </CardTitle>
+                  <CardDescription className="text-gray-400">
+                    Aponte a câmera do WhatsApp para a imagem abaixo para estabelecer a conexão.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col items-center py-6 space-y-4">
+                  {qrCodeBase64 ? (
+                    <div className="p-4 bg-white rounded-xl shadow-2xl border-4 border-[#D4AF37]">
+                      <img src={qrCodeBase64} alt="QR Code WhatsApp" className="w-64 h-64" />
                     </div>
-
-                    {qrCodeBase64 && (
-                      <div className="flex items-center justify-between w-full max-w-sm px-2 text-xs text-gray-400">
-                        <span className="flex items-center gap-1.5">
-                          <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                          Atualiza em: <strong className="text-white">{countdown}s</strong>
-                        </span>
-                        <button
-                          onClick={handleRefreshQrCode}
-                          disabled={loadingQr}
-                          className="text-[#D4AF37] hover:underline font-medium"
-                        >
-                          Renovar agora
-                        </button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Instruções */}
-                <Card className="lg:col-span-5 bg-[#141414] border-[#222] shadow-xl flex flex-col justify-between">
-                  <div>
-                    <CardHeader className="border-b border-[#222] pb-4">
-                      <CardTitle className="text-lg text-white flex items-center gap-2">
-                        <Smartphone className="w-5 h-5 text-[#25D366]" /> Passo a Passo no Celular
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-6 space-y-4 text-sm text-gray-300">
-                      <div className="flex items-start gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-[#D4AF37] text-black font-bold text-xs shrink-0 mt-0.5">
-                          1
-                        </span>
-                        <p>Abra o <strong>WhatsApp</strong> no celular da barbearia.</p>
-                      </div>
-
-                      <div className="flex items-start gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-[#D4AF37] text-black font-bold text-xs shrink-0 mt-0.5">
-                          2
-                        </span>
-                        <p>Toque em <strong>Configurações</strong> (iOS) ou nos <strong>3 pontinhos</strong> (Android).</p>
-                      </div>
-
-                      <div className="flex items-start gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-[#D4AF37] text-black font-bold text-xs shrink-0 mt-0.5">
-                          3
-                        </span>
-                        <p>Selecione <strong>Aparelhos conectados</strong> &rarr; <strong>Conectar um aparelho</strong>.</p>
-                      </div>
-
-                      <div className="flex items-start gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
-                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-[#D4AF37] text-black font-bold text-xs shrink-0 mt-0.5">
-                          4
-                        </span>
-                        <p>Aponte a câmera para o <strong>QR Code</strong> exibido ao lado.</p>
-                      </div>
-                    </CardContent>
-                  </div>
-
-                  <div className="p-6 pt-0">
-                    <div className="p-3.5 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-xs text-emerald-300 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 shrink-0 text-[#25D366]" />
-                      A página conecta automaticamente assim que você escanear.
+                  ) : (
+                    <div className="w-64 h-64 rounded-xl border border-dashed border-[#444] flex flex-col items-center justify-center p-6 text-center text-gray-400 space-y-3">
+                      <Loader2 className="w-8 h-8 animate-spin text-[#D4AF37]" />
+                      <p className="text-xs">Gerando QR Code atualizado...</p>
                     </div>
+                  )}
+
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <span>Expira em: <strong className="text-amber-400 font-mono">{countdown}s</strong></span>
+                    <Button variant="ghost" size="sm" onClick={handleRefreshQrCode} disabled={loadingQr} className="text-[#D4AF37] hover:underline h-auto p-0 ml-2">
+                      Atualizar Agora
+                    </Button>
                   </div>
-                </Card>
-              </div>
+                </CardContent>
+              </Card>
             )}
-
-            {/* DADOS COMPLETOS DA INSTÂNCIA EVOLUTION API (SEMPRE VISÍVEL) */}
-            <Card className="bg-[#141414] border-[#222] shadow-xl">
-              <CardHeader className="border-b border-[#222] pb-3">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <Server className="w-5 h-5 text-[#D4AF37]" />
-                    <CardTitle className="text-base text-white">Dados da Instância Evolution API</CardTitle>
-                  </div>
-                  <Badge variant="outline" className="border-[#333] text-gray-300 text-xs">
-                    Instância: <span className="text-[#D4AF37] ml-1 font-mono font-bold">{evolutionApi.getInstanceName()}</span>
-                  </Badge>
-                </div>
-              </CardHeader>
-
-              <CardContent className="pt-5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  
-                  {/* Status da Conexão */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Status da Conexão</span>
-                    <div className="flex items-center gap-2">
-                      {connectionState === 'open' ? (
-                        <span className="inline-flex items-center text-xs font-bold text-[#25D366] bg-[#25D366]/10 px-2 py-0.5 rounded">
-                          <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Aberta (open)
-                        </span>
-                      ) : connectionState === 'connecting' ? (
-                        <span className="inline-flex items-center text-xs font-bold text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded animate-pulse">
-                          <RotateCw className="w-3.5 h-3.5 mr-1 animate-spin" /> Conectando (connecting)
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center text-xs font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded">
-                          <XCircle className="w-3.5 h-3.5 mr-1" /> Fechada (close)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Número Vinculado */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Número do WhatsApp</span>
-                    <p className="text-sm font-semibold text-white font-mono flex items-center gap-1.5">
-                      <PhoneCall className="w-3.5 h-3.5 text-[#25D366]" />
-                      {instanceDetails?.number ? `+${instanceDetails.number}` : (instanceDetails?.ownerJid ? instanceDetails.ownerJid.replace('@s.whatsapp.net', '') : '(31) 97365-1924')}
-                    </p>
-                  </div>
-
-                  {/* Perfil WhatsApp */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Nome do Perfil</span>
-                    <p className="text-sm font-semibold text-white truncate">
-                      {instanceDetails?.profileName || 'Demattos Visage'}
-                    </p>
-                  </div>
-
-                  {/* Servidor Endpoint */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Servidor API</span>
-                    <p className="text-xs font-medium text-gray-300 font-mono truncate">
-                      {evolutionApi.getApiUrl()}
-                    </p>
-                  </div>
-
-                  {/* Mensagens */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Mensagens na Fila</span>
-                    <p className="text-base font-bold text-[#D4AF37]">
-                      {instanceDetails?._count?.Message ? Number(instanceDetails._count.Message).toLocaleString('pt-BR') : '23.873'}
-                    </p>
-                  </div>
-
-                  {/* Contatos */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Contatos Sincronizados</span>
-                    <p className="text-base font-bold text-white">
-                      {instanceDetails?._count?.Contact ? Number(instanceDetails._count.Contact).toLocaleString('pt-BR') : '1.896'}
-                    </p>
-                  </div>
-
-                  {/* Chats */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Conversas Ativas</span>
-                    <p className="text-base font-bold text-white">
-                      {instanceDetails?._count?.Chat ? Number(instanceDetails._count.Chat).toLocaleString('pt-BR') : '900'}
-                    </p>
-                  </div>
-
-                  {/* Tipo de Integração */}
-                  <div className="p-3.5 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] space-y-1">
-                    <span className="text-[11px] uppercase tracking-wider text-gray-400 block">Motor de Integração</span>
-                    <p className="text-xs font-semibold text-gray-300 font-mono">
-                      {instanceDetails?.integration || 'WHATSAPP-BAILEYS'}
-                    </p>
-                  </div>
-
-                </div>
-
-                {/* ID da Instância e Token */}
-                <div className="mt-4 pt-3 border-t border-[#222] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-gray-500">
-                  <div className="flex items-center gap-1.5 font-mono">
-                    <Hash className="w-3.5 h-3.5 text-gray-400" />
-                    <span>ID da Instância: <strong className="text-gray-300">{instanceDetails?.id || '7c6038ba-611b-4b7f-89c6-177a9c415f86'}</strong></span>
-                  </div>
-                  <span className="text-[11px]">Sincronização em tempo real ativa com o Evolution API v2</span>
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
 
-          {/* ==================== ABA 2: MODELOS DE MENSAGENS & LEMBRETES ==================== */}
+          {/* ==================== ABA 2: MODELOS & SPINTAX ==================== */}
           <TabsContent value="templates" className="space-y-6 m-0">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               
@@ -773,7 +655,7 @@ function AdminWhatsAppContent() {
               <div className="lg:col-span-7 space-y-6">
                 
                 {/* Seleção do Tipo de Template */}
-                <div className="flex items-center gap-2 border-b border-[#222] pb-3">
+                <div className="flex flex-wrap items-center gap-2 border-b border-[#222] pb-3">
                   <Button
                     type="button"
                     size="sm"
@@ -781,7 +663,7 @@ function AdminWhatsAppContent() {
                     onClick={() => setActiveTemplateTab('confirmacao')}
                     className={`text-xs ${activeTemplateTab === 'confirmacao' ? 'bg-[#25D366] text-black hover:bg-[#20ba5a]' : 'border-[#333] text-gray-300'}`}
                   >
-                    ✅ 1. Confirmação
+                    ✅ 1. Confirmação (Cliente)
                   </Button>
                   <Button
                     type="button"
@@ -790,7 +672,7 @@ function AdminWhatsAppContent() {
                     onClick={() => setActiveTemplateTab('cancelamento')}
                     className={`text-xs ${activeTemplateTab === 'cancelamento' ? 'bg-red-500 text-white hover:bg-red-600' : 'border-[#333] text-gray-300'}`}
                   >
-                    ❌ 2. Cancelamento
+                    ❌ 2. Cancelamento (Cliente)
                   </Button>
                   <Button
                     type="button"
@@ -799,7 +681,16 @@ function AdminWhatsAppContent() {
                     onClick={() => setActiveTemplateTab('lembrete')}
                     className={`text-xs ${activeTemplateTab === 'lembrete' ? 'bg-[#D4AF37] text-black hover:bg-[#b89730]' : 'border-[#333] text-gray-300'}`}
                   >
-                    ⏰ 3. Lembrete Agendado
+                    ⏰ 3. Lembrete (Cliente)
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={activeTemplateTab === 'aviso_barbeiro' ? 'default' : 'outline'}
+                    onClick={() => setActiveTemplateTab('aviso_barbeiro')}
+                    className={`text-xs ${activeTemplateTab === 'aviso_barbeiro' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'border-[#333] text-gray-300'}`}
+                  >
+                    🔔 4. Aviso ao Barbeiro
                   </Button>
                 </div>
 
@@ -811,7 +702,7 @@ function AdminWhatsAppContent() {
                         <div>
                           <CardTitle className="text-base text-white">Mensagem de Confirmação</CardTitle>
                           <CardDescription className="text-xs text-gray-400">
-                            Enviada imediatamente quando o cliente conclui o agendamento no site.
+                            Enviada quando o cliente conclui o agendamento no site ou quando o barbeiro confirma manualmente.
                           </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
@@ -899,7 +790,7 @@ function AdminWhatsAppContent() {
                             <Clock className="w-4 h-4 text-[#D4AF37]" /> Mensagem de Lembrete Agendado
                           </CardTitle>
                           <CardDescription className="text-xs text-gray-400">
-                            Disparada automaticamente com antecedência para reduzir faltas.
+                            Disparada automaticamente com antecedência para evitar no-shows e faltas.
                           </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
@@ -912,28 +803,6 @@ function AdminWhatsAppContent() {
                       </div>
                     </CardHeader>
                     <CardContent className="pt-4 space-y-4">
-                      {/* Agendamento do Envio */}
-                      <div className="p-3.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] space-y-2">
-                        <label className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-[#D4AF37]" /> Quando enviar o lembrete?
-                        </label>
-                        <Select
-                          value={settings.lembrete_timing}
-                          onValueChange={(val) => setSettings({ ...settings, lembrete_timing: val })}
-                        >
-                          <SelectTrigger className="bg-[#111] border-[#333] text-white text-xs">
-                            <SelectValue placeholder="Selecione o momento do envio" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-[#1a1a1a] border-[#333] text-white">
-                            <SelectItem value="3_horas_antes">⏰ 3 horas antes do horário agendado (Recomendado)</SelectItem>
-                            <SelectItem value="2_horas_antes">⏰ 2 horas antes do horário agendado</SelectItem>
-                            <SelectItem value="1_hora_antes">⏰ 1 hora antes do horário agendado</SelectItem>
-                            <SelectItem value="1_dia_antes">📅 1 dia antes (24 horas antes do horário)</SelectItem>
-                            <SelectItem value="no_dia_cedo">🌅 No mesmo dia pela manhã (às 08:00)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label className="text-xs font-semibold text-gray-300">Texto do Lembrete</label>
@@ -956,23 +825,72 @@ function AdminWhatsAppContent() {
                   </Card>
                 )}
 
-                {/* Variáveis Dinâmicas para Inserir */}
+                {/* Bloco 4: AVISO AO BARBEIRO */}
+                {activeTemplateTab === 'aviso_barbeiro' && (
+                  <Card className="bg-[#141414] border-[#222]">
+                    <CardHeader className="pb-3 border-b border-[#222]">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-base text-white flex items-center gap-2">
+                            <Bell className="w-4 h-4 text-blue-400" /> Notificação de Novo Agendamento (Barbeiro)
+                          </CardTitle>
+                          <CardDescription className="text-xs text-gray-400">
+                            Enviada para o WhatsApp do profissional assim que um cliente conclui o agendamento no site.
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">Ativar:</span>
+                          <Switch
+                            checked={settings.notificar_barbeiro_ativo}
+                            onCheckedChange={(c) => setSettings({ ...settings, notificar_barbeiro_ativo: c })}
+                          />
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-4 space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-semibold text-gray-300">Texto da Notificação</label>
+                          <button
+                            type="button"
+                            onClick={() => handleResetTemplate('aviso_barbeiro')}
+                            className="text-[11px] text-[#D4AF37] hover:underline"
+                          >
+                            Restaurar Padrão
+                          </button>
+                        </div>
+                        <Textarea
+                          rows={10}
+                          value={settings.template_aviso_barbeiro}
+                          onChange={(e) => setSettings({ ...settings, template_aviso_barbeiro: e.target.value })}
+                          className="bg-[#1a1a1a] border-[#333] text-white font-mono text-xs focus:border-[#D4AF37]"
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Variáveis Dinâmicas & Spintax para Inserir */}
                 <Card className="bg-[#141414] border-[#222]">
                   <CardHeader className="py-3 border-b border-[#222]">
                     <CardTitle className="text-xs text-gray-300 flex items-center gap-1.5 uppercase tracking-wider">
-                      <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" /> Variáveis Disponíveis (Clique para inserir no texto)
+                      <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" /> Variáveis Dinâmicas & Anti-Ban
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="pt-3">
+                  <CardContent className="pt-3 space-y-3">
                     <div className="flex flex-wrap gap-2">
                       {[
-                        { tag: '{{cliente_nome}}', label: 'Nome do Cliente' },
-                        { tag: '{{barbeiro_nome}}', label: 'Nome do Barbeiro' },
-                        { tag: '{{servico}}', label: 'Serviço Agendado' },
-                        { tag: '{{data}}', label: 'Data do Corte' },
+                        { tag: '{{saudacao_periodo}}', label: 'Bom dia / Boa tarde / Boa noite' },
+                        { tag: '{{cliente_nome}}', label: 'Nome Completo' },
+                        { tag: '{{cliente_primeiro_nome}}', label: 'Primeiro Nome' },
+                        { tag: '{{cliente_telefone}}', label: 'Telefone Cliente' },
+                        { tag: '{{barbeiro_nome}}', label: 'Nome Barbeiro' },
+                        { tag: '{{servico}}', label: 'Serviço' },
+                        { tag: '{{data}}', label: 'Data' },
                         { tag: '{{horario}}', label: 'Horário' },
-                        { tag: '{{endereco}}', label: 'Endereço Barbearia' },
-                        { tag: '{{telefone_barbearia}}', label: 'Telefone Contato' },
+                        { tag: '{{endereco}}', label: 'Endereço' },
+                        { tag: '{{telefone_barbearia}}', label: 'Telefone Barbearia' },
+                        { tag: '{{observacoes}}', label: 'Observações' },
                       ].map((item) => (
                         <Button
                           key={item.tag}
@@ -987,10 +905,17 @@ function AdminWhatsAppContent() {
                         </Button>
                       ))}
                     </div>
+
+                    <div className="p-2.5 rounded bg-[#1c1c1c] border border-[#2a2a2a] text-xs text-gray-300 flex items-start gap-2">
+                      <Shuffle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-blue-300">Dica Anti-Ban (Spintax):</strong> Você pode usar variações como <code className="text-[#D4AF37]">{`{Olá|Oi|Como vai}`}</code> ou <code className="text-[#D4AF37]">{`{Te esperamos!|Contamos com você!}`}</code>. O sistema sorteia uma opção diferente para cada cliente, impedindo que a Meta detecte mensagens duplicadas repetitivas.
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
 
-                {/* Botão de Salvar Configurações */}
+                {/* Botões de Ação */}
                 <div className="flex items-center justify-between pt-2">
                   <Button
                     type="button"
@@ -1032,11 +957,17 @@ function AdminWhatsAppContent() {
                   <CardHeader className="py-3 border-b border-[#222]">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-xs text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <Smartphone className="w-3.5 h-3.5 text-[#25D366]" /> Prévia no WhatsApp do Cliente
+                        <Smartphone className="w-3.5 h-3.5 text-[#25D366]" /> Prévia no WhatsApp {activeTemplateTab === 'aviso_barbeiro' ? 'do Barbeiro' : 'do Cliente'}
                       </CardTitle>
-                      <Badge variant="outline" className="text-[10px] border-[#333] text-gray-400">
-                        Visualização ao Vivo
-                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPreviewSeed(s => s + 1)}
+                        className="text-[11px] h-7 text-[#D4AF37] hover:bg-[#222] flex items-center gap-1"
+                        title="Gera outra variação de Spintax para pré-visualização"
+                      >
+                        <Shuffle className="w-3 h-3" /> Gerar Variação
+                      </Button>
                     </div>
                   </CardHeader>
                   <CardContent className="p-4">
@@ -1071,7 +1002,7 @@ function AdminWhatsAppContent() {
                     </div>
 
                     <p className="text-[11px] text-gray-500 mt-3 text-center">
-                      * Negritos (*) e formatações são convertidos automaticamente pelo WhatsApp.
+                      * O botão "Gerar Variação" simula as diferentes combinações Spintax entregues aos clientes.
                     </p>
                   </CardContent>
                 </Card>
@@ -1079,6 +1010,397 @@ function AdminWhatsAppContent() {
 
             </div>
           </TabsContent>
+
+          {/* ==================== ABA 3: PARÂMETROS DE DISPARO & LEMBRETES ==================== */}
+          <TabsContent value="regras" className="space-y-6 m-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Bloco: Parâmetros do Lembrete Principal */}
+              <Card className="bg-[#141414] border-[#222]">
+                <CardHeader>
+                  <CardTitle className="text-base text-white flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-[#D4AF37]" /> Lembrete de Horário Principal
+                  </CardTitle>
+                  <CardDescription className="text-xs text-gray-400">
+                    Defina com quanta antecedência o cliente receberá o lembrete oficial de corte.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                    <div>
+                      <p className="text-xs font-semibold text-white">Disparo de Lembrete Ativo</p>
+                      <p className="text-[11px] text-gray-400">Ativa o envio automático antes do horário</p>
+                    </div>
+                    <Switch
+                      checked={settings.lembrete_ativo}
+                      onCheckedChange={(c) => setSettings({ ...settings, lembrete_ativo: c })}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-[#D4AF37]" /> Momento de Envio do Lembrete:
+                    </label>
+                    <Select
+                      value={settings.lembrete_timing}
+                      onValueChange={(val) => setSettings({ ...settings, lembrete_timing: val })}
+                    >
+                      <SelectTrigger className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                        <SelectValue placeholder="Selecione o momento" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                        <SelectItem value="1_dia_antes_noite">🌙 1 dia antes às 19:00 (Véspera - Recomendado)</SelectItem>
+                        <SelectItem value="1_dia_antes_24h">📅 24 horas antes do horário exato</SelectItem>
+                        <SelectItem value="no_dia_cedo">🌅 No mesmo dia pela manhã (às 08:30)</SelectItem>
+                        <SelectItem value="3_horas_antes">⏰ 3 horas antes do horário</SelectItem>
+                        <SelectItem value="2_horas_antes">⏰ 2 horas antes do horário</SelectItem>
+                        <SelectItem value="1_hora_antes">⏰ 1 hora antes do horário</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-gray-400">
+                      O envio na véspera (às 19:00) garante tempo para o cliente reagendar e liberar a vaga para outro.
+                    </p>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-white">Segundo Lembrete de Reforço</p>
+                        <p className="text-[11px] text-gray-400">Disparo extra próximo ao horário marcado</p>
+                      </div>
+                      <Switch
+                        checked={settings.segundo_lembrete_ativo}
+                        onCheckedChange={(c) => setSettings({ ...settings, segundo_lembrete_ativo: c })}
+                      />
+                    </div>
+
+                    {settings.segundo_lembrete_ativo && (
+                      <div className="pt-2 border-t border-[#2a2a2a] space-y-1.5">
+                        <label className="text-[11px] text-gray-300">Momento do 2º Lembrete:</label>
+                        <Select
+                          value={settings.segundo_lembrete_timing}
+                          onValueChange={(val) => setSettings({ ...settings, segundo_lembrete_timing: val })}
+                        >
+                          <SelectTrigger className="bg-[#111] border-[#333] text-white text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                            <SelectItem value="2_horas_antes">⏰ 2 horas antes do horário</SelectItem>
+                            <SelectItem value="1_hora_antes">⏰ 1 hora antes do horário</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Bloco: Parâmetros da Confirmação & Barbeiro */}
+              <div className="space-y-6">
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader>
+                    <CardTitle className="text-base text-white flex items-center gap-2">
+                      <CheckCheck className="w-5 h-5 text-[#25D366]" /> Confirmação de Agendamento
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-400">
+                      Ritmo e comportamento do envio da mensagem de confirmação para o cliente.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                      <div>
+                        <p className="text-xs font-semibold text-white">Disparo de Confirmação Ativo</p>
+                        <p className="text-[11px] text-gray-400">Envia resumo oficial para o cliente</p>
+                      </div>
+                      <Switch
+                        checked={settings.confirmacao_ativa}
+                        onCheckedChange={(c) => setSettings({ ...settings, confirmacao_ativa: c })}
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-gray-300">Ritmo de Envio:</label>
+                      <Select
+                        value={settings.confirmacao_delay_modo}
+                        onValueChange={(val) => setSettings({ ...settings, confirmacao_delay_modo: val })}
+                      >
+                        <SelectTrigger className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                          <SelectItem value="instantaneo">⚡ Instantâneo (Logo após a finalização no site)</SelectItem>
+                          <SelectItem value="delay_1_min">⏱️ Aguardar 1 a 2 minutos (Humanizado - Parece confirmação manual)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader>
+                    <CardTitle className="text-base text-white flex items-center gap-2">
+                      <Bell className="w-5 h-5 text-blue-400" /> Comunicação com a Equipe
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-400">
+                      Notificações instantâneas no WhatsApp do barbeiro.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                      <div>
+                        <p className="text-xs font-semibold text-white">Avisar Barbeiro ao Agendar</p>
+                        <p className="text-[11px] text-gray-400">Envia nome do cliente, serviço e horário</p>
+                      </div>
+                      <Switch
+                        checked={settings.notificar_barbeiro_ativo}
+                        onCheckedChange={(c) => setSettings({ ...settings, notificar_barbeiro_ativo: c })}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+            </div>
+
+            <div className="flex justify-end pt-4">
+              <Button
+                onClick={handleSaveSettings}
+                disabled={savingSettings}
+                className="bg-[#D4AF37] hover:bg-[#b89730] text-black font-bold px-8"
+              >
+                {savingSettings ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                Salvar Parâmetros de Disparo
+              </Button>
+            </div>
+          </TabsContent>
+
+          {/* ==================== ABA 4: PROTEÇÃO ANTI-BAN META ==================== */}
+          <TabsContent value="antiban" className="space-y-6 m-0">
+            {/* Medidor de Saúde do WhatsApp */}
+            <Card className="bg-[#141414] border-[#222]">
+              <CardContent className="p-5">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-5 h-5 text-[#25D366]" />
+                      <h3 className="text-base font-bold text-white">Índice de Saúde & Segurança Anti-Ban Meta</h3>
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      Calculado com base nas regras ativas de comportamento humano, variações textuais e horários.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <span className="text-2xl font-black text-white font-mono">{healthScore}%</span>
+                      <span className={`block text-[11px] font-semibold ${healthScore >= 80 ? 'text-[#25D366]' : healthScore >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                        {healthScore >= 80 ? '🟢 Baixíssimo Risco de Bloqueio' : healthScore >= 50 ? '🟡 Risco Moderado' : '🔴 Atenção Necessária'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="w-full bg-[#222] h-2.5 rounded-full mt-4 overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-500 rounded-full ${healthScore >= 80 ? 'bg-gradient-to-r from-emerald-500 to-[#25D366]' : healthScore >= 50 ? 'bg-gradient-to-r from-amber-500 to-yellow-400' : 'bg-red-500'}`}
+                    style={{ width: `${healthScore}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Regra 1: Simulação Humana (Digitando + Jitter) */}
+              <Card className="bg-[#141414] border-[#222]">
+                <CardHeader>
+                  <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-[#25D366]" /> Simulação de Comportamento Humano
+                  </CardTitle>
+                  <CardDescription className="text-xs text-gray-400">
+                    A Meta monitora conexões que disparam instantaneamente sem interação no chat.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                    <div>
+                      <p className="text-xs font-semibold text-white">Simular "Digitando..." (Composing)</p>
+                      <p className="text-[11px] text-gray-400">Ativa presença no chat 2s a 3s antes do texto</p>
+                    </div>
+                    <Switch
+                      checked={settings.antiban_simular_digitando}
+                      onCheckedChange={(c) => setSettings({ ...settings, antiban_simular_digitando: c })}
+                    />
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] space-y-2">
+                    <label className="text-xs font-semibold text-gray-200">
+                      Intervalo Aleatório entre Disparos (Jitter em segundos):
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <span className="text-[10px] text-gray-400 block mb-1">Mínimo (seg):</span>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="15"
+                          value={settings.antiban_delay_min}
+                          onChange={(e) => setSettings({ ...settings, antiban_delay_min: Number(e.target.value) })}
+                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                        />
+                      </div>
+                      <span className="text-gray-500 pt-4">até</span>
+                      <div className="flex-1">
+                        <span className="text-[10px] text-gray-400 block mb-1">Máximo (seg):</span>
+                        <Input
+                          type="number"
+                          min="3"
+                          max="30"
+                          value={settings.antiban_delay_max}
+                          onChange={(e) => setSettings({ ...settings, antiban_delay_max: Number(e.target.value) })}
+                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-gray-400 pt-1">
+                      Impede envios no mesmo segundo exato, simulando o tempo de uma pessoa real.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Regra 2: Silêncio Noturno & Anti-Denúncia */}
+              <Card className="bg-[#141414] border-[#222]">
+                <CardHeader>
+                  <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Moon className="w-4 h-4 text-amber-400" /> Janela de Silêncio Noturno (Anti-Denúncia)
+                  </CardTitle>
+                  <CardDescription className="text-xs text-gray-400">
+                    Mensagens enviadas de madrugada causam 85% das denúncias de spam da Meta.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                    <div>
+                      <p className="text-xs font-semibold text-white">Bloqueio Fora do Horário Permitido</p>
+                      <p className="text-[11px] text-gray-400">Cancela disparos automáticos durante a noite</p>
+                    </div>
+                    <Switch
+                      checked={settings.antiban_janela_ativa}
+                      onCheckedChange={(c) => setSettings({ ...settings, antiban_janela_ativa: c })}
+                    />
+                  </div>
+
+                  {settings.antiban_janela_ativa && (
+                    <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                      <div>
+                        <span className="text-[10px] text-gray-400 block mb-1">Início dos Disparos:</span>
+                        <Input
+                          type="time"
+                          value={settings.antiban_janela_inicio}
+                          onChange={(e) => setSettings({ ...settings, antiban_janela_inicio: e.target.value })}
+                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400 block mb-1">Fim dos Disparos:</span>
+                        <Input
+                          type="time"
+                          value={settings.antiban_janela_fim}
+                          onChange={(e) => setSettings({ ...settings, antiban_janela_fim: e.target.value })}
+                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                    <div>
+                      <p className="text-xs font-semibold text-white">Rodapé de Remarcação Cortês</p>
+                      <p className="text-[11px] text-gray-400">Incentiva resposta em vez de denúncia</p>
+                    </div>
+                    <Switch
+                      checked={settings.antiban_rodape_optout}
+                      onCheckedChange={(c) => setSettings({ ...settings, antiban_rodape_optout: c })}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Regra 3: Variações Textuais Spintax */}
+              <Card className="bg-[#141414] border-[#222]">
+                <CardHeader>
+                  <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Shuffle className="w-4 h-4 text-blue-400" /> Variações Dinâmicas de Texto (Spintax)
+                  </CardTitle>
+                  <CardDescription className="text-xs text-gray-400">
+                    Gera combinações e saudações distintas para que nenhuma mensagem tenha hash idêntico.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
+                    <div>
+                      <p className="text-xs font-semibold text-white">Ativar Processamento Spintax</p>
+                      <p className="text-[11px] text-gray-400">Alterna saudações e frases automaticamente</p>
+                    </div>
+                    <Switch
+                      checked={settings.antiban_spintax_ativo}
+                      onCheckedChange={(c) => setSettings({ ...settings, antiban_spintax_ativo: c })}
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Mesmo que 50 clientes recebam confirmação no mesmo dia, os filtros de hash da Meta verão 50 textos ligeiramente diferentes.
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Regra 4: Limite por Hora */}
+              <Card className="bg-[#141414] border-[#222]">
+                <CardHeader>
+                  <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-[#D4AF37]" /> Limite de Fila por Hora
+                  </CardTitle>
+                  <CardDescription className="text-xs text-gray-400">
+                    Controla o fluxo máximo de disparos automatizados por hora.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-gray-300">Teto Máximo Recomendado:</label>
+                    <Select
+                      value={String(settings.antiban_limite_hora)}
+                      onValueChange={(val) => setSettings({ ...settings, antiban_limite_hora: Number(val) })}
+                    >
+                      <SelectTrigger className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#1a1a1a] border-[#333] text-white text-xs">
+                        <SelectItem value="20">20 mensagens / hora (Máxima Segurança)</SelectItem>
+                        <SelectItem value="30">30 mensagens / hora (Recomendado para Barbearia)</SelectItem>
+                        <SelectItem value="50">50 mensagens / hora (Alto Volume)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Números de WhatsApp comuns não devem ultrapassar 40-50 envios não solicitados por hora.
+                  </p>
+                </CardContent>
+              </Card>
+
+            </div>
+
+            <div className="flex justify-end pt-4">
+              <Button
+                onClick={handleSaveSettings}
+                disabled={savingSettings}
+                className="bg-[#D4AF37] hover:bg-[#b89730] text-black font-bold px-8"
+              >
+                {savingSettings ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                Salvar Regras de Proteção Anti-Ban
+              </Button>
+            </div>
+          </TabsContent>
+
         </Tabs>
 
         {/* Informações Técnicas */}

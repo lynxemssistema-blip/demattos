@@ -28,11 +28,39 @@ export const base44 = {
         .eq('id', user.id)
         .maybeSingle();
 
+      const userEmail = (user.email || '').toLowerCase().trim();
+      let role = profile?.role || user.user_metadata?.role || 'user';
+
+      // Se não for admin pelo profile, verificar se é profissional com acesso admin ou email privilegiado
+      if (role !== 'admin' && role !== 'superadmin') {
+        const isAdminEmail = ['luandemattos102030@gmail.com', 'edsonmanoel2012@gmail.com'].includes(userEmail);
+        if (isAdminEmail) {
+          role = 'admin';
+        } else {
+          try {
+            const { data: prof } = await supabase
+              .from('profissional')
+              .select('tem_acesso_admin')
+              .ilike('email', userEmail)
+              .eq('tem_acesso_admin', true)
+              .maybeSingle();
+            if (prof?.tem_acesso_admin) {
+              role = 'admin';
+            }
+          } catch (e) {
+            // Ignora falhas de query
+          }
+        }
+      }
+
+      const isAdmin = role === 'admin' || role === 'superadmin';
+
       return {
         id: user.id,
         email: user.email,
         full_name: profile?.full_name || user.user_metadata?.full_name || user.email,
-        role: profile?.role || 'user',
+        role,
+        isAdmin,
         ai_credits: profile?.ai_credits || 0,
         profissao: profile?.profissao || null
       };

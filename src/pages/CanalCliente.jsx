@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { User, Calendar, Clock, ArrowLeft, Edit, Star, Plus, Send, CheckCircle, XCircle, Trash2, Sparkles, Ban, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { User, Calendar, Clock, ArrowLeft, Edit, Star, Plus, Send, CheckCircle, XCircle, Trash2, Sparkles, Ban, ChevronDown, ChevronUp, X, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { format } from 'date-fns';
@@ -24,7 +24,7 @@ import AgendamentoForm from '../components/AgendamentoForm';
 import DeleteAccountSection from '../components/DeleteAccountSection';
 
 function CanalClienteContent() {
-  const { cliente: clienteAuth, logout: authContextLogout } = useAuth();
+  const { cliente: clienteAuth, isAdmin, logout: authContextLogout } = useAuth();
   const [cliente, setCliente] = useState(null);
   const [agendamentos, setAgendamentos] = useState([]);
   const [depoimentos, setDepoimentos] = useState([]);
@@ -447,18 +447,55 @@ function CanalClienteContent() {
                 <p className="text-gray-400 text-xs sm:text-sm hidden sm:block">Bem-vindo ao seu Canal DeMattos</p>
               </div>
             </div>
-            <Button
-              onClick={handleLogout}
-              className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 text-xs sm:text-sm px-3 sm:px-4 flex-shrink-0 touch-manipulation"
-            >
-              Sair
-            </Button>
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <Link to={createPageUrl('Admin')}>
+                  <Button
+                    className="bg-[#D4AF37] hover:bg-[#B8973D] text-black font-bold text-xs sm:text-sm px-3 sm:px-4 flex items-center gap-1.5 touch-manipulation shadow-md shadow-[#D4AF37]/20"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span className="hidden sm:inline">Painel</span> Admin
+                  </Button>
+                </Link>
+              )}
+              <Button
+                onClick={handleLogout}
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 text-xs sm:text-sm px-3 sm:px-4 flex-shrink-0 touch-manipulation"
+              >
+                Sair
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-12">
+        {/* Admin Callout Card */}
+        {isAdmin && (
+          <Card className="bg-gradient-to-r from-[#D4AF37]/25 via-[#D4AF37]/10 to-transparent border-2 border-[#D4AF37] mb-4 sm:mb-6 shadow-xl shadow-[#D4AF37]/10">
+            <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 w-full sm:w-auto">
+                <div className="w-12 h-12 bg-[#D4AF37] rounded-xl flex items-center justify-center flex-shrink-0 shadow-md">
+                  <ShieldCheck className="w-7 h-7 text-black" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-white font-bold text-base sm:text-lg">Acesso Administrativo</h3>
+                    <span className="bg-[#D4AF37] text-black text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full">ADMIN</span>
+                  </div>
+                  <p className="text-gray-300 text-xs sm:text-sm">Você tem acesso completo aos agendamentos, clientes, WhatsApp Evolution e configurações.</p>
+                </div>
+              </div>
+              <Link to={createPageUrl('Admin')} className="w-full sm:w-auto">
+                <Button className="w-full sm:w-auto bg-[#D4AF37] hover:bg-[#B8973D] text-black font-bold text-sm px-6 py-2.5 shadow-lg shadow-[#D4AF37]/20 touch-manipulation">
+                  Abrir Painel Admin
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
         {/* DeMattos IA - Card Único */}
         <Card className="bg-gradient-to-r from-[#D4AF37]/20 to-[#D4AF37]/5 border-[#D4AF37]/30 mb-4 sm:mb-6">
           <CardContent className="p-4 sm:p-6">
