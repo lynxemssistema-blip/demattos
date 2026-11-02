@@ -2,6 +2,7 @@ import React from 'react';
 import { Toaster } from "@/components/ui/toaster"
 import TrackingInjector from '@/components/TrackingInjector'
 import AdminRastreamento from '@/pages/AdminRastreamento'
+import AdminWhatsApp from '@/pages/AdminWhatsApp'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
 import NavigationTracker from '@/lib/NavigationTracker'
@@ -48,19 +49,46 @@ const AuthenticatedApp = () => {
             </LayoutWrapper>
           </PageTransition>
         } />
-        {Object.entries(Pages).map(([path, Page]) => (
-          <Route
-            key={path}
-            path={`/${path}`}
-            element={
-              <PageTransition>
-                <LayoutWrapper currentPageName={path}>
-                  <Page />
-                </LayoutWrapper>
-              </PageTransition>
-            }
-          />
-        ))}
+        {/* Rotas automáticas com suporte a maiúsculas e minúsculas */}
+        {Object.entries(Pages).flatMap(([path, Page]) => {
+          const routes = [
+            <Route
+              key={path}
+              path={`/${path}`}
+              element={
+                <PageTransition>
+                  <LayoutWrapper currentPageName={path}>
+                    <Page />
+                  </LayoutWrapper>
+                </PageTransition>
+              }
+            />
+          ];
+          const lower = path.toLowerCase();
+          if (lower !== path) {
+            routes.push(
+              <Route
+                key={`${path}-lower`}
+                path={`/${lower}`}
+                element={
+                  <PageTransition>
+                    <LayoutWrapper currentPageName={path}>
+                      <Page />
+                    </LayoutWrapper>
+                  </PageTransition>
+                }
+              />
+            );
+          }
+          return routes;
+        })}
+        {/* Rotas diretas e tolerantes para WhatsApp Evolution */}
+        <Route path="/AdminWhatsApp" element={<PageTransition><LayoutWrapper currentPageName="AdminWhatsApp"><AdminWhatsApp /></LayoutWrapper></PageTransition>} />
+        <Route path="/adminwhatsapp" element={<PageTransition><LayoutWrapper currentPageName="AdminWhatsApp"><AdminWhatsApp /></LayoutWrapper></PageTransition>} />
+        <Route path="/AdminWhatsapp" element={<PageTransition><LayoutWrapper currentPageName="AdminWhatsApp"><AdminWhatsApp /></LayoutWrapper></PageTransition>} />
+        <Route path="/whatsapp" element={<PageTransition><LayoutWrapper currentPageName="AdminWhatsApp"><AdminWhatsApp /></LayoutWrapper></PageTransition>} />
+        <Route path="/admin/whatsapp" element={<PageTransition><LayoutWrapper currentPageName="AdminWhatsApp"><AdminWhatsApp /></LayoutWrapper></PageTransition>} />
+
         <Route path="/AdminRastreamento" element={<PageTransition><LayoutWrapper currentPageName="AdminRastreamento"><AdminRastreamento /></LayoutWrapper></PageTransition>} />
         <Route path="*" element={<PageTransition><PageNotFound /></PageTransition>} />
       </Routes>

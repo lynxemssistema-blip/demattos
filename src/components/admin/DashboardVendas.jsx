@@ -50,10 +50,6 @@ export default function DashboardVendas() {
     balance: stripeData.balance || { available: 0, pending: 0 }
   };
 
-  const maxValorGrafico = stats.ultimos7Dias.length > 0 
-    ? Math.max(...stats.ultimos7Dias.map(d => d?.total || 0), 1)
-    : 1;
-
   return (
     <div className="space-y-6">
       {/* Período */}
@@ -104,49 +100,6 @@ export default function DashboardVendas() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Gráfico de vendas */}
-      <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-white">Pagamentos</CardTitle>
-            <div className="flex items-center gap-4 text-sm">
-              <span className="text-gray-400">
-                Volume líquido: <span className="text-white font-semibold">R$ {stats.volumeBrutoMes.toFixed(2)}</span>
-              </span>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 flex items-end gap-3">
-            {stats.ultimos7Dias.length === 0 ? (
-              <div className="w-full flex items-center justify-center h-full">
-                <p className="text-gray-500 text-sm">Nenhuma venda nos últimos 7 dias</p>
-              </div>
-            ) : (
-              stats.ultimos7Dias.map((dia, idx) => {
-                const altura = dia?.total && maxValorGrafico > 0 ? (dia.total / maxValorGrafico) * 100 : 0;
-                return (
-                  <div key={idx} className="flex-1 flex flex-col items-center">
-                    <div className="w-full bg-[#0a0a0a] rounded-t relative" style={{ height: '200px' }}>
-                      {dia?.total > 0 && (
-                        <div
-                          className="absolute bottom-0 w-full bg-[#D4AF37] rounded-t hover:bg-[#B8973D] transition-all cursor-pointer"
-                          style={{ height: `${altura}%` }}
-                          title={`R$ ${dia.total.toFixed(2)}`}
-                        />
-                      )}
-                    </div>
-                    <span className="text-xs text-gray-500 mt-2">
-                      {dia?.dia || 0}/{dia?.mes || 0}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Métricas adicionais */}
       <div className="grid md:grid-cols-4 gap-4">

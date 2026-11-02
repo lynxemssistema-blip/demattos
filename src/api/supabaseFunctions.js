@@ -95,44 +95,79 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
       }
 
       case 'getStripeDashboardData': {
-        const { data: agendamentosRecentes } = await supabase
+        // Obter dados reais de compras e agendamentos (valores zerados na ausência de vendas reais)
+        const { data: compras } = await supabase
+          .from('compra')
+          .select('valor, status, created_date');
+
+        const { data: agendamentosConcluidos } = await supabase
           .from('agendamento')
           .select('servico, created_date, status')
-          .order('created_date', { ascending: false })
-          .limit(30);
+          .eq('status', 'concluido');
 
         const { data: servicos } = await supabase.from('servico').select('nome, preco');
         const servicosMap = new Map((servicos || []).map(s => [s.nome?.toLowerCase(), s.preco || 0]));
 
-        let volumeMes = 0;
-        (agendamentosRecentes || []).forEach(ag => {
-          volumeMes += servicosMap.get(ag.servico?.toLowerCase()) || 45;
+        let volumeBrutoTotal = 0;
+        let volumeBrutoMes = 0;
+        let quantidadeVendasTotal = 0;
+        let quantidadeVendasMes = 0;
+        let valorPendente = 0;
+        let comprasPendentesQtd = 0;
+
+        const hoje = new Date();
+        const mesAtualStr = hoje.toISOString().substring(0, 7);
+
+        (compras || []).forEach(c => {
+          const val = Number(c.valor) || 0;
+          const isPago = c.status === 'pago' || c.status === 'completed' || c.status === 'approved' || c.status === 'paid';
+          const isPendente = c.status === 'pendente' || c.status === 'pending';
+
+          if (isPago) {
+            volumeBrutoTotal += val;
+            quantidadeVendasTotal += 1;
+            if (c.created_date && c.created_date.startsWith(mesAtualStr)) {
+              volumeBrutoMes += val;
+              quantidadeVendasMes += 1;
+            }
+          } else if (isPendente) {
+            valorPendente += val;
+            comprasPendentesQtd += 1;
+          }
+        });
+
+        (agendamentosConcluidos || []).forEach(ag => {
+          const preco = servicosMap.get(ag.servico?.toLowerCase()) || 0;
+          volumeBrutoTotal += preco;
+          quantidadeVendasTotal += 1;
+          if (ag.created_date && ag.created_date.startsWith(mesAtualStr)) {
+            volumeBrutoMes += preco;
+            quantidadeVendasMes += 1;
+          }
         });
 
         const ultimos7Dias = [];
-        const hoje = new Date();
         for (let i = 6; i >= 0; i--) {
           const d = new Date(hoje);
           d.setDate(d.getDate() - i);
           const dateStr = d.toISOString().split('T')[0];
-          const countDia = (agendamentosRecentes || []).filter(a => a.created_date?.startsWith(dateStr)).length;
           ultimos7Dias.push({
             data: dateStr,
-            total: (countDia > 0 ? countDia * 55 : (i % 2 === 0 ? 120 : 85))
+            total: 0
           });
         }
 
         return {
           data: {
             success: true,
-            volumeBrutoMes: volumeMes > 0 ? volumeMes : 4850.00,
-            volumeBrutoTotal: 48500.00,
-            quantidadeVendasMes: agendamentosRecentes?.length || 45,
-            quantidadeVendasTotal: 1071,
-            valorPendente: 0,
-            comprasPendentesQtd: 0,
+            volumeBrutoMes,
+            volumeBrutoTotal,
+            quantidadeVendasMes,
+            quantidadeVendasTotal,
+            valorPendente,
+            comprasPendentesQtd,
             ultimos7Dias,
-            balance: { available: 4850.00, pending: 0 }
+            balance: { available: volumeBrutoMes, pending: valorPendente }
           }
         };
       }

@@ -1228,7 +1228,175 @@ function AdminWhatsAppContent() {
             </div>
           </TabsContent>
 
-          {/* ==================== ABA 4: PROTEÇÃO ANTI-BAN META ==================== */}
+          
+          {/* ==================== ABA 4: LOGOTIPO & IDENTIDADE VISUAL ==================== */}
+          <TabsContent value="logo" className="space-y-6 m-0">
+            <Card className="bg-[#141414] border-[#222]">
+              <CardHeader className="pb-3 border-b border-[#222]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ImageIcon className="w-5 h-5 text-[#D4AF37]" />
+                    <CardTitle className="text-base text-white">Logotipo Oficial Barbearia DeMattos</CardTitle>
+                  </div>
+                  <Badge className="bg-[#D4AF37]/10 text-[#D4AF37] border-[#D4AF37]/30 text-xs">
+                    Identidade Visual
+                  </Badge>
+                </div>
+                <CardDescription className="text-[#888] text-xs">
+                  Envie automaticamente a imagem oficial da Barbearia DeMattos junto às notificações via WhatsApp (com legenda formatada).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-5 space-y-6">
+                {/* Visualizador do Logotipo */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                  <div className="flex flex-col items-center justify-center p-6 bg-black border border-[#222] rounded-xl space-y-3">
+                    <div className="relative w-48 h-48 rounded-xl overflow-hidden border-2 border-[#D4AF37]/40 shadow-xl bg-black flex items-center justify-center">
+                      <img
+                        src={settings.whatsapp_logo_url || DEFAULT_LOGO_URL}
+                        alt="Logo Barbearia DeMattos"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.target.src = '/logo_demattos.jpg';
+                        }}
+                      />
+                    </div>
+                    <span className="text-xs text-[#888]">Visualização do Logo Dourado</span>
+                  </div>
+
+                  <div className="space-y-4">
+                    {/* Master Switch */}
+                    <div className="flex items-center justify-between p-4 bg-black/40 border border-[#222] rounded-lg">
+                      <div className="space-y-0.5">
+                        <label className="text-white text-sm font-semibold flex items-center gap-2">
+                          <Check className="w-4 h-4 text-[#D4AF37]" />
+                          Incluir Logo nas Mensagens
+                        </label>
+                        <p className="text-xs text-[#888]">
+                          Ao habilitar, as notificações selecionadas abaixo serão enviadas com a imagem do logo e legenda.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.whatsapp_incluir_logo}
+                        onCheckedChange={(val) => updateSetting('whatsapp_incluir_logo', val)}
+                      />
+                    </div>
+
+                    {/* URL da Imagem */}
+                    <div className="space-y-2">
+                      <label className="text-white text-xs block font-medium">URL Pública da Imagem / Logo</label>
+                      <Input
+                        value={settings.whatsapp_logo_url || ''}
+                        onChange={(e) => updateSetting('whatsapp_logo_url', e.target.value)}
+                        placeholder="https://demattos.lynxems.com.br/logo_demattos.jpg"
+                        className="bg-black/60 border-[#333] text-white text-xs"
+                      />
+                      <p className="text-[11px] text-[#777]">
+                        Padrão oficial: <code>{DEFAULT_LOGO_URL}</code>
+                      </p>
+                    </div>
+
+                    {/* Botão de Restaurar Padrão */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => updateSetting('whatsapp_logo_url', DEFAULT_LOGO_URL)}
+                      className="border-[#333] text-[#aaa] hover:text-white text-xs"
+                    >
+                      Restaurar URL Padrão
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Seleção de Mensagens que recebem a Logo */}
+                <div className="space-y-3 pt-4 border-t border-[#222]">
+                  <label className="text-white text-sm font-semibold block">Quais mensagens devem incluir a foto oficial:</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex items-center justify-between p-3.5 bg-black/30 border border-[#222] rounded-lg">
+                      <div>
+                        <p className="text-xs font-medium text-white">Confirmação de Agendamento</p>
+                        <p className="text-[11px] text-[#777]">Enviada logo após o cliente marcar o corte</p>
+                      </div>
+                      <Switch
+                        checked={settings.whatsapp_logo_em_confirmacao}
+                        onCheckedChange={(val) => updateSetting('whatsapp_logo_em_confirmacao', val)}
+                        disabled={!settings.whatsapp_incluir_logo}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3.5 bg-black/30 border border-[#222] rounded-lg">
+                      <div>
+                        <p className="text-xs font-medium text-white">Lembrete de Horário</p>
+                        <p className="text-[11px] text-[#777]">Disparo prévio (1 dia antes / no dia)</p>
+                      </div>
+                      <Switch
+                        checked={settings.whatsapp_logo_em_lembrete}
+                        onCheckedChange={(val) => updateSetting('whatsapp_logo_em_lembrete', val)}
+                        disabled={!settings.whatsapp_incluir_logo}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3.5 bg-black/30 border border-[#222] rounded-lg">
+                      <div>
+                        <p className="text-xs font-medium text-white">Cancelamento</p>
+                        <p className="text-[11px] text-[#777]">Aviso de cancelamento de horário</p>
+                      </div>
+                      <Switch
+                        checked={settings.whatsapp_logo_em_cancelamento}
+                        onCheckedChange={(val) => updateSetting('whatsapp_logo_em_cancelamento', val)}
+                        disabled={!settings.whatsapp_incluir_logo}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3.5 bg-black/30 border border-[#222] rounded-lg">
+                      <div>
+                        <p className="text-xs font-medium text-white">Aviso Interno para o Barbeiro</p>
+                        <p className="text-[11px] text-[#777]">Notificação para a equipe</p>
+                      </div>
+                      <Switch
+                        checked={settings.whatsapp_logo_em_aviso_barbeiro}
+                        onCheckedChange={(val) => updateSetting('whatsapp_logo_em_aviso_barbeiro', val)}
+                        disabled={!settings.whatsapp_incluir_logo}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Disparo de Teste com Logo */}
+                <div className="p-4 bg-[#1a1810] border border-[#D4AF37]/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1 text-center sm:text-left">
+                    <p className="text-sm font-semibold text-[#D4AF37] flex items-center justify-center sm:justify-start gap-2">
+                      <Send className="w-4 h-4" /> Disparar Teste Imediato com a Logo
+                    </p>
+                    <p className="text-xs text-[#aaa]">
+                      Envia uma mensagem com imagem e legenda para o número configurado.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleSendLogoTest}
+                    disabled={sendingTest || connectionState !== 'open'}
+                    className="bg-[#D4AF37] hover:bg-[#b89730] text-black font-bold whitespace-nowrap"
+                  >
+                    {sendingTest ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Flame className="w-4 h-4 mr-2 text-black" />}
+                    Disparar Teste com Logo
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSaveSettings}
+                disabled={savingSettings}
+                className="bg-[#D4AF37] hover:bg-[#b89730] text-black font-bold px-8"
+              >
+                {savingSettings ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                Salvar Configurações da Logo
+              </Button>
+            </div>
+          </TabsContent>
+
+
+          {/* ==================== ABA 5: PROTEÇÃO ANTI-BAN META ==================== */}
           <TabsContent value="antiban" className="space-y-6 m-0">
             {/* Medidor de Saúde do WhatsApp */}
             <Card className="bg-[#141414] border-[#222]">
@@ -1456,28 +1624,6 @@ function AdminWhatsAppContent() {
           </TabsContent>
 
         </Tabs>
-
-        {/* Informações Técnicas */}
-        <Card className="bg-[#141414] border-[#222]">
-          <CardContent className="py-3 px-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-gray-400">
-              <div className="flex items-center gap-2">
-                <Info className="w-4 h-4 text-[#D4AF37] shrink-0" />
-                <span>
-                  <strong>Servidor Evolution:</strong> {evolutionApi.getApiUrl()} &bull; <strong>App Oficial:</strong> https://demattos.lynxems.com.br/
-                </span>
-              </div>
-              <a
-                href={`${evolutionApi.getApiUrl()}/manager`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[#D4AF37] hover:underline flex items-center gap-1 font-medium"
-              >
-                Painel Evolution Manager <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          </CardContent>
-        </Card>
 
       </div>
     </div>
