@@ -4,6 +4,7 @@ const DEFAULT_API_URL = import.meta.env.VITE_EVOLUTION_API_URL || 'https://evo.l
 const DEFAULT_API_KEY = import.meta.env.VITE_EVOLUTION_API_KEY || 'F10230BCFE78-4B5A-80F3-789AD4E58B79';
 const DEFAULT_INSTANCE = import.meta.env.VITE_EVOLUTION_INSTANCE || 'DeMattos';
 export const LUAN_DEFAULT_PHONE = '5531973651924';
+export const DEFAULT_LOGO_URL = 'https://demattos.lynxems.com.br/logo_demattos.jpg';
 
 /**
  * Processa sintaxe Spintax {opcao1|opcao2|opcao3} para gerar variações dinâmicas de texto.
@@ -291,13 +292,49 @@ export const evolutionApi = {
   },
 
   /**
-   * Envio inteligente com Proteção Anti-Ban Meta:
+   * Envia mensagem de mídia (imagem, logotipo, documento) com legenda
+   */
+  async sendMediaMessage(number, mediaUrl, caption = '', mimetype = 'image/jpeg', fileName = 'logo_demattos.jpg', instanceName = this.getInstanceName()) {
+    try {
+      let cleanNumber = (number || '').toString().replace(/\D/g, '');
+      if (!cleanNumber) throw new Error('Número de telefone inválido.');
+
+      if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
+        cleanNumber = `55${cleanNumber}`;
+      }
+
+      const res = await this.request(`/message/sendMedia/${instanceName}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          number: cleanNumber,
+          mediatype: 'image',
+          mimetype,
+          caption: caption || '',
+          media: mediaUrl,
+          fileName
+        })
+      });
+
+      return {
+        success: res.ok,
+        data: res.data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  },
+
+  /**
+   * Envio inteligente com Proteção Anti-Ban Meta e suporte a Mídia/Logo:
    * 1. Verifica janela de horário permitido (evita denúncias de spam durante a noite).
    * 2. Simula ação humana de digitação ("composing") no WhatsApp do destinatário.
    * 3. Aplica delay humanizado com jitter aleatório para quebrar padrões repetitivos.
-   * 4. Dispara a mensagem com segurança máxima para preservar o número.
+   * 4. Dispara a mensagem com logo/mídia se fornecido, com fallback seguro para texto simples.
    */
-  async sendHumanizedTextMessage(number, text, settingsOverride = null, instanceName = this.getInstanceName()) {
+  async sendHumanizedTextMessage(number, text, settingsOverride = null, instanceName = this.getInstanceName(), options = {}) {
     try {
       const settings = settingsOverride || await this.getWhatsAppSettings();
 
@@ -342,7 +379,26 @@ export const evolutionApi = {
         await new Promise(r => setTimeout(r, randomDelayMs));
       }
 
-      // 4. Envio oficial
+      // 4. Envio oficial (com mídia/logo se fornecido, fallback transparente para texto)
+      if (options.mediaUrl) {
+        try {
+          const mediaRes = await this.sendMediaMessage(
+            number,
+            options.mediaUrl,
+            text,
+            options.mimetype || 'image/jpeg',
+            options.fileName || 'logo_demattos.jpg',
+            instanceName
+          );
+          if (mediaRes.success) {
+            return mediaRes;
+          }
+          console.warn('[WhatsApp] Falha ao enviar com logo/mídia, recorrendo a texto simples:', mediaRes.error);
+        } catch (errMedia) {
+          console.warn('[WhatsApp] Exceção ao enviar mídia, recorrendo a texto simples:', errMedia.message);
+        }
+      }
+
       return await this.sendTextMessage(number, text, instanceName);
     } catch (error) {
       console.error('[Anti-Ban] Erro no envio humanizado, usando envio padrão:', error);
@@ -419,6 +475,14 @@ export const evolutionApi = {
         antiban_limite_hora: Number(map.whatsapp_antiban_limite_hora) || 30,
         antiban_rodape_optout: map.whatsapp_antiban_rodape_optout !== 'false',
 
+        // Identidade Visual e Inclusão da Logo da Barbearia
+        whatsapp_incluir_logo: map.whatsapp_incluir_logo !== 'false',
+        whatsapp_logo_url: map.whatsapp_logo_url || DEFAULT_LOGO_URL,
+        whatsapp_logo_em_confirmacao: map.whatsapp_logo_em_confirmacao !== 'false',
+        whatsapp_logo_em_lembrete: map.whatsapp_logo_em_lembrete !== 'false',
+        whatsapp_logo_em_cancelamento: map.whatsapp_logo_em_cancelamento !== 'false',
+        whatsapp_logo_em_aviso_barbeiro: map.whatsapp_logo_em_aviso_barbeiro === 'true',
+
         // Modelos de Mensagens
         template_confirmacao: map.whatsapp_template_confirmacao || DEFAULT_TEMPLATES.confirmacao,
         template_cancelamento: map.whatsapp_template_cancelamento || DEFAULT_TEMPLATES.cancelamento,
@@ -447,6 +511,12 @@ export const evolutionApi = {
         antiban_janela_fim: '21:30',
         antiban_limite_hora: 30,
         antiban_rodape_optout: true,
+        whatsapp_incluir_logo: true,
+        whatsapp_logo_url: DEFAULT_LOGO_URL,
+        whatsapp_logo_em_confirmacao: true,
+        whatsapp_logo_em_lembrete: true,
+        whatsapp_logo_em_cancelamento: true,
+        whatsapp_logo_em_aviso_barbeiro: false,
         template_confirmacao: DEFAULT_TEMPLATES.confirmacao,
         template_cancelamento: DEFAULT_TEMPLATES.cancelamento,
         template_lembrete: DEFAULT_TEMPLATES.lembrete,
@@ -480,6 +550,12 @@ export const evolutionApi = {
         { chave: 'whatsapp_antiban_janela_fim', valor: settings.antiban_janela_fim, descricao: 'Anti-Ban: Fim da janela de envio' },
         { chave: 'whatsapp_antiban_limite_hora', valor: String(settings.antiban_limite_hora), descricao: 'Anti-Ban: Limite de mensagens por hora' },
         { chave: 'whatsapp_antiban_rodape_optout', valor: String(settings.antiban_rodape_optout), descricao: 'Anti-Ban: Rodapé de remarcação e opt-out cortês' },
+        { chave: 'whatsapp_incluir_logo', valor: String(settings.whatsapp_incluir_logo), descricao: 'Identidade: Incluir logo da barbearia' },
+        { chave: 'whatsapp_logo_url', valor: settings.whatsapp_logo_url || DEFAULT_LOGO_URL, descricao: 'Identidade: URL da logo da barbearia' },
+        { chave: 'whatsapp_logo_em_confirmacao', valor: String(settings.whatsapp_logo_em_confirmacao), descricao: 'Identidade: Logo em confirmação' },
+        { chave: 'whatsapp_logo_em_lembrete', valor: String(settings.whatsapp_logo_em_lembrete), descricao: 'Identidade: Logo em lembrete' },
+        { chave: 'whatsapp_logo_em_cancelamento', valor: String(settings.whatsapp_logo_em_cancelamento), descricao: 'Identidade: Logo em cancelamento' },
+        { chave: 'whatsapp_logo_em_aviso_barbeiro', valor: String(settings.whatsapp_logo_em_aviso_barbeiro), descricao: 'Identidade: Logo em aviso ao barbeiro' },
         { chave: 'whatsapp_template_confirmacao', valor: settings.template_confirmacao, descricao: 'Modelo de mensagem de confirmação' },
         { chave: 'whatsapp_template_cancelamento', valor: settings.template_cancelamento, descricao: 'Modelo de mensagem de cancelamento' },
         { chave: 'whatsapp_template_lembrete', valor: settings.template_lembrete, descricao: 'Modelo de mensagem de lembrete' },
@@ -531,8 +607,17 @@ export const evolutionApi = {
         console.log(`[WhatsApp] Disparando em MODO OFICIAL com Proteção Anti-Ban para (${targetNumber})`);
       }
 
-      // Envio humanizado (digitando + jitter + janela de horário)
-      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings);
+      // Definir mídia/logo oficial se configurada
+      let mediaUrl = null;
+      if (settings.whatsapp_incluir_logo) {
+        const logo = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
+        if (tipo === 'confirmacao' && settings.whatsapp_logo_em_confirmacao) mediaUrl = logo;
+        if (tipo === 'lembrete' && settings.whatsapp_logo_em_lembrete) mediaUrl = logo;
+        if (tipo === 'cancelamento' && settings.whatsapp_logo_em_cancelamento) mediaUrl = logo;
+      }
+
+      // Envio humanizado (digitando + jitter + janela de horário + logo/mídia se ativa)
+      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
 
       // Registrar histórico em conversa_whatsapp se possível
       try {
@@ -583,7 +668,12 @@ export const evolutionApi = {
         console.log(`[WhatsApp] Disparando aviso ao barbeiro em MODO OFICIAL para (${targetNumber})`);
       }
 
-      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings);
+      let mediaUrl = null;
+      if (settings.whatsapp_incluir_logo && settings.whatsapp_logo_em_aviso_barbeiro) {
+        mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
+      }
+
+      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
 
       try {
         await supabase.from('conversa_whatsapp').insert({
@@ -630,7 +720,12 @@ export const evolutionApi = {
         formattedText = `🧪 *[MODO DE TESTE - CANCELAMENTO AO BARBEIRO]*\n\n${formattedText}`;
       }
 
-      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings);
+      let mediaUrl = null;
+      if (settings.whatsapp_incluir_logo && settings.whatsapp_logo_em_aviso_barbeiro) {
+        mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
+      }
+
+      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
 
       try {
         await supabase.from('conversa_whatsapp').insert({

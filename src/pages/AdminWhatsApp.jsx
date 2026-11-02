@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import AdminRoute from '@/components/auth/AdminRoute';
 import { createPageUrl } from '@/utils';
-import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE } from '@/api/evolutionClient';
+import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL } from '@/api/evolutionClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -51,7 +51,8 @@ import {
   Check,
   Activity,
   Flame,
-  CheckCheck
+  CheckCheck,
+  Image as ImageIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
@@ -95,6 +96,13 @@ function AdminWhatsAppContent() {
     antiban_rodape_optout: true,
 
     // Modelos
+    whatsapp_incluir_logo: true,
+    whatsapp_logo_url: DEFAULT_LOGO_URL,
+    whatsapp_logo_em_confirmacao: true,
+    whatsapp_logo_em_lembrete: true,
+    whatsapp_logo_em_cancelamento: true,
+    whatsapp_logo_em_aviso_barbeiro: false,
+
     template_confirmacao: DEFAULT_TEMPLATES.confirmacao,
     template_cancelamento: DEFAULT_TEMPLATES.cancelamento,
     template_lembrete: DEFAULT_TEMPLATES.lembrete,
@@ -334,7 +342,11 @@ function AdminWhatsAppContent() {
         text = `🧪 *[TESTE MANUAL - MODELO ${tipo.toUpperCase()}]*\n\n${text}`;
       }
 
-      const res = await evolutionApi.sendHumanizedTextMessage(targetNumber, text, settings);
+      let mediaUrl = null;
+      if (settings.whatsapp_incluir_logo && settings[`whatsapp_logo_em_${tipo}`]) {
+        mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
+      }
+      const res = await evolutionApi.sendHumanizedTextMessage(targetNumber, text, settings, evolutionApi.getInstanceName(), { mediaUrl });
       if (res.success) {
         toast.success(`Mensagem de teste enviada com sucesso para ${targetNumber}!`);
       } else {
@@ -342,6 +354,42 @@ function AdminWhatsAppContent() {
       }
     } catch (e) {
       toast.error('Erro ao enviar teste: ' + e.message);
+    } finally {
+      setSendingTest(false);
+    }
+  };
+
+    const handleSendLogoTest = async () => {
+    if (connectionState !== 'open') {
+      toast.warning('O WhatsApp precisa estar conectado para disparar o teste.');
+      return;
+    }
+    const targetNumber = settings.modo_operacao === 'teste' ? settings.numero_teste_luan : (testNumber || settings.numero_teste_luan);
+    if (!targetNumber) {
+      toast.error('Informe um número de telefone com DDD.');
+      return;
+    }
+
+    setSendingTest(true);
+    try {
+      const caption = `💈 *Barbearia DeMattos* 💈\n\nTeste oficial de inclusão do logotipo nas notificações do WhatsApp! ✂️🔥\n\n*Cliente:* Carlos Silva\n*Serviço:* Corte & Barba Visagista\n*Horário:* 15:30\n*Endereço:* R. Rio Tocantins, 328 - Riacho das Pedras, Contagem\n\nTe esperamos no horário marcado!`;
+
+      const res = await evolutionApi.sendMediaMessage(
+        targetNumber,
+        settings.whatsapp_logo_url || DEFAULT_LOGO_URL,
+        caption,
+        'image/jpeg',
+        'logo_demattos.jpg'
+      );
+
+      if (res.success) {
+        toast.success(`Mensagem com a logo oficial enviada para ${targetNumber}!`);
+        confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
+      } else {
+        toast.error('Falha no envio com logo: ' + (res.error || 'Erro desconhecido'));
+      }
+    } catch (err) {
+      toast.error('Erro no envio: ' + err.message);
     } finally {
       setSendingTest(false);
     }
@@ -510,30 +558,36 @@ function AdminWhatsAppContent() {
 
         {/* Abas Principais do Hub WhatsApp */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-[#141414] border border-[#222] p-1.5 h-auto grid grid-cols-2 md:grid-cols-4 max-w-3xl gap-1">
+          <TabsList className="bg-[#141414] border border-[#222] p-1.5 h-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 max-w-4xl gap-1">
             <TabsTrigger
               value="conexao"
-              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
             >
-              <Smartphone className="w-4 h-4" /> Conexão & QR Code
+              <Smartphone className="w-4 h-4" /> Conexão & QR
             </TabsTrigger>
             <TabsTrigger
               value="templates"
-              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
             >
               <MessageSquare className="w-4 h-4" /> Modelos & Spintax
             </TabsTrigger>
             <TabsTrigger
               value="regras"
-              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
             >
-              <Clock className="w-4 h-4" /> Parâmetros de Disparo
+              <Clock className="w-4 h-4" /> Lembretes
+            </TabsTrigger>
+            <TabsTrigger
+              value="logo"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
+            >
+              <ImageIcon className="w-4 h-4" /> Logo Barbearia
             </TabsTrigger>
             <TabsTrigger
               value="antiban"
-              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-2"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
             >
-              <ShieldCheck className="w-4 h-4" /> Proteção Anti-Ban Meta
+              <ShieldCheck className="w-4 h-4" /> Anti-Ban Meta
             </TabsTrigger>
           </TabsList>
 
