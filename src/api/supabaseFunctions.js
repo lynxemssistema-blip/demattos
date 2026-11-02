@@ -96,16 +96,36 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
       case 'getStripeDashboardData': {
         // Obter dados reais de compras e agendamentos (valores zerados na ausência de vendas reais)
-        const { data: compras } = await supabase
-          .from('compra')
-          .select('valor, status, created_date');
+        let compras = [];
+        let agendamentosConcluidos = [];
+        let servicos = [];
 
-        const { data: agendamentosConcluidos } = await supabase
-          .from('agendamento')
-          .select('servico, created_date, status')
-          .eq('status', 'concluido');
+        try {
+          const resCompras = await supabase
+            .from('compra')
+            .select('valor, status_pagamento, created_date');
+          compras = resCompras.data || [];
+        } catch (e) {
+          console.warn('Aviso ao consultar compras:', e);
+        }
 
-        const { data: servicos } = await supabase.from('servico').select('nome, preco');
+        try {
+          const resAg = await supabase
+            .from('agendamento')
+            .select('servico, created_date, status')
+            .eq('status', 'concluido');
+          agendamentosConcluidos = resAg.data || [];
+        } catch (e) {
+          console.warn('Aviso ao consultar agendamentos:', e);
+        }
+
+        try {
+          const resServ = await supabase.from('servico').select('nome, preco');
+          servicos = resServ.data || [];
+        } catch (e) {
+          console.warn('Aviso ao consultar servicos:', e);
+        }
+
         const servicosMap = new Map((servicos || []).map(s => [s.nome?.toLowerCase(), s.preco || 0]));
 
         let volumeBrutoTotal = 0;
@@ -120,8 +140,9 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         (compras || []).forEach(c => {
           const val = Number(c.valor) || 0;
-          const isPago = c.status === 'pago' || c.status === 'completed' || c.status === 'approved' || c.status === 'paid';
-          const isPendente = c.status === 'pendente' || c.status === 'pending';
+          const status = (c.status_pagamento || '').toLowerCase();
+          const isPago = status === 'pago' || status === 'completed' || status === 'approved' || status === 'paid';
+          const isPendente = status === 'pendente' || status === 'pending';
 
           if (isPago) {
             volumeBrutoTotal += val;
