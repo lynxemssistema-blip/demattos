@@ -57,7 +57,8 @@ import {
   Megaphone,
   Play,
   Square,
-  RotateCcw
+  RotateCcw,
+  Search
 } from 'lucide-react';
 import { supabaseAdmin } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
@@ -122,8 +123,12 @@ function AdminWhatsAppContent() {
   const [activeTemplateTab, setActiveTemplateTab] = useState('confirmacao');
 
   // Estados de Marketing & Campanhas
-  const [marketingSegment, setMarketingSegment] = useState('inativos_15');
-  const [clientesList, setClientesList] = useState([]);
+  const [marketingSegment, setMarketingSegment] = useState('clientes_app_15');
+  const [contactsFilterTab, setContactsFilterTab] = useState('todos'); // 'clientes_app', 'leads_agenda', 'todos'
+  const [contactsSearch, setContactsSearch] = useState('');
+  const [clientesAppList, setClientesAppList] = useState([]);
+  const [leadsAgendaList, setLeadsAgendaList] = useState([]);
+  const [contactsVisibleLimit, setContactsVisibleLimit] = useState(60);
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [campaignRunning, setCampaignRunning] = useState(false);
   const [campaignProgress, setCampaignProgress] = useState({ total: 0, current: 0, sent: 0, failed: 0, nextCountdown: 0, currentContact: '' });
@@ -180,33 +185,75 @@ function AdminWhatsAppContent() {
   const loadClientesForMarketing = async () => {
     setLoadingClientes(true);
     try {
-      const [resCli, resAg] = await Promise.all([
+      const [resCli, resAg, evoContacts] = await Promise.all([
         supabaseAdmin.from('cliente').select('id, nome, telefone'),
-        supabaseAdmin.from('agendamento').select('cliente_nome, cliente_telefone, data').order('data', { ascending: false })
+        supabaseAdmin.from('agendamento').select('cliente_nome, cliente_telefone, data').order('data', { ascending: false }),
+        evolutionApi.getContacts()
       ]);
 
-      const map = new Map();
+      const appSet = new Set();
+      const appMap = new Map();
+
       (resCli.data || []).forEach(c => {
-        const tel = (c.telefone || '').replace(/\D/g, '');
-        if (tel && tel.length >= 8) {
-          map.set(tel, { nome: (c.nome || 'Cliente').trim(), telefone: tel, ultima_data: null });
+        const raw = (c.telefone || '').replace(/\D/g, '');
+        if (raw.length >= 8) {
+          const key = raw.slice(-8);
+          appSet.add(key);
+          appMap.set(key, {
+            id: c.id || key,
+            nome: (c.nome || 'Cliente').trim(),
+            telefone: raw,
+            ultima_data: null,
+            tipo: 'cliente_app',
+            origem: 'Cadastro do App'
+          });
         }
       });
 
       (resAg.data || []).forEach(a => {
-        const tel = (a.cliente_telefone || '').replace(/\D/g, '');
-        if (tel && tel.length >= 8) {
-          const existing = map.get(tel) || { nome: (a.cliente_nome || 'Cliente').trim(), telefone: tel, ultima_data: null };
+        const raw = (a.cliente_telefone || '').replace(/\D/g, '');
+        if (raw.length >= 8) {
+          const key = raw.slice(-8);
+          appSet.add(key);
+          const existing = appMap.get(key) || {
+            id: key,
+            nome: (a.cliente_nome || 'Cliente').trim(),
+            telefone: raw,
+            ultima_data: null,
+            tipo: 'cliente_app',
+            origem: 'Agendamento App'
+          };
           if (!existing.ultima_data || (a.data && a.data > existing.ultima_data)) {
             existing.ultima_data = a.data;
           }
-          map.set(tel, existing);
+          appMap.set(key, existing);
         }
       });
 
-      setClientesList(Array.from(map.values()));
+      const leads = [];
+      (evoContacts || []).forEach(c => {
+        const raw = (c.telefone || '').replace(/\D/g, '');
+        if (raw.length >= 8) {
+          const key = raw.slice(-8);
+          if (!appSet.has(key)) {
+            leads.push({
+              id: c.id || raw,
+              nome: (c.nome || 'Lead WhatsApp').trim(),
+              telefone: raw,
+              profilePicUrl: c.profilePicUrl || null,
+              ultima_data: null,
+              tipo: 'lead_agenda',
+              origem: 'Agenda Telefônica Evolution'
+            });
+          }
+        }
+      });
+
+      setClientesAppList(Array.from(appMap.values()));
+      setLeadsAgendaList(leads);
     } catch (e) {
-      console.error('Erro ao carregar clientes para marketing:', e);
+      console.error('Erro ao carregar clientes e leads:', e);
+      toast.error('Erro ao sincronizar agenda da Evolution API.');
     } finally {
       setLoadingClientes(false);
     }
@@ -518,20 +565,100 @@ function AdminWhatsAppContent() {
       return [{
         nome: 'Barbeiro Luan (Teste)',
         telefone: settings.numero_teste_luan || LUAN_DEFAULT_PHONE,
-        ultima_data: 'Hoje'
+        ultima_data: 'Hoje',
+        tipo: 'teste',
+        origem: 'Celular do Barbeiro'
       }];
     }
 
     const now = new Date();
-    return clientesList.filter(cli => {
-      if (marketingSegment === 'todos') return true;
-      if (!cli.ultima_data) return true; // Clientes sem agendamento recente
 
-      const diffDays = Math.floor((now - new Date(cli.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-      if (marketingSegment === 'inativos_15') return diffDays >= 15;
-      if (marketingSegment === 'inativos_30') return diffDays >= 30;
-      return true;
+    if (marketingSegment === 'clientes_app_todos') {
+      return clientesAppList;
+    }
+
+    if (marketingSegment === 'clientes_app_15') {
+      return clientesAppList.filter(cli => {
+        if (!cli.ultima_data) return true;
+        const diffDays = Math.floor((now - new Date(cli.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+        return diffDays >= 15;
+      });
+    }
+
+    if (marketingSegment === 'clientes_app_30') {
+      return clientesAppList.filter(cli => {
+        if (!cli.ultima_data) return true;
+        const diffDays = Math.floor((now - new Date(cli.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+        return diffDays >= 30;
+      });
+    }
+
+    if (marketingSegment === 'leads_agenda_30') {
+      return leadsAgendaList.slice(0, 30);
+    }
+
+    if (marketingSegment === 'leads_agenda_50') {
+      return leadsAgendaList.slice(0, 50);
+    }
+
+    if (marketingSegment === 'leads_agenda_todos') {
+      return leadsAgendaList;
+    }
+
+    if (marketingSegment === 'todos') {
+      return [...clientesAppList, ...leadsAgendaList];
+    }
+
+    return clientesAppList;
+  };
+
+  const getFilteredContactsForExplorer = () => {
+    let baseList = [];
+    if (contactsFilterTab === 'clientes_app') {
+      baseList = clientesAppList;
+    } else if (contactsFilterTab === 'leads_agenda') {
+      baseList = leadsAgendaList;
+    } else {
+      baseList = [...clientesAppList, ...leadsAgendaList];
+    }
+
+    if (!contactsSearch.trim()) return baseList;
+
+    const q = contactsSearch.toLowerCase().trim();
+    return baseList.filter(c => {
+      const nomeMatch = c.nome && c.nome.toLowerCase().includes(q);
+      const telMatch = c.telefone && c.telefone.includes(q);
+      return nomeMatch || telMatch;
     });
+  };
+
+  const formatPhoneNumber = (num) => {
+    if (!num) return '';
+    const digits = num.replace(/\D/g, '');
+    if (digits.length === 11) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    }
+    if (digits.length === 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 13 && digits.startsWith('55')) {
+      const local = digits.slice(2);
+      return `+55 (${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+    }
+    if (digits.length === 12 && digits.startsWith('55')) {
+      const local = digits.slice(2);
+      return `+55 (${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
+    }
+    return num;
+  };
+
+  const formatDateBR = (dateStr) => {
+    if (!dateStr) return null;
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return dateStr;
   };
 
   const handleSendMarketingTest = async () => {
@@ -1633,6 +1760,48 @@ function AdminWhatsAppContent() {
               </CardHeader>
             </Card>
 
+            {/* Resumo da Base: Clientes do App vs Leads da Agenda Evolution */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-[#141414] border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                  <p className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" /> Clientes do App
+                  </p>
+                  <p className="text-2xl font-black text-white font-mono mt-1">{clientesAppList.length}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Cadastrados ou com agendamento</p>
+                </div>
+                <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl">
+                  👥
+                </div>
+              </div>
+
+              <div className="bg-[#141414] border border-purple-500/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                  <p className="text-xs font-semibold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-purple-400" /> Leads da Agenda Evolution
+                  </p>
+                  <p className="text-2xl font-black text-white font-mono mt-1">{leadsAgendaList.length}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Contatos telefônicos (WhatsApp)</p>
+                </div>
+                <div className="w-11 h-11 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold text-xl">
+                  📱
+                </div>
+              </div>
+
+              <div className="bg-[#141414] border border-[#D4AF37]/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                  <p className="text-xs font-semibold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#D4AF37]" /> Base Total de Contatos
+                  </p>
+                  <p className="text-2xl font-black text-white font-mono mt-1">{clientesAppList.length + leadsAgendaList.length}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Público total sem duplicidade</p>
+                </div>
+                <div className="w-11 h-11 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center text-[#D4AF37] font-bold text-xl">
+                  🌐
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* COLUNA ESQUERDA (7 colunas): Configurações, Imagem, Texto e Segmentação */}
               <div className="lg:col-span-7 space-y-6">
@@ -1760,106 +1929,204 @@ function AdminWhatsAppContent() {
                   </CardContent>
                 </Card>
 
-                {/* 3. Segmentação de Clientes */}
+                {/* 3. Segmentação de Clientes & Leads */}
                 <Card className="bg-[#141414] border-[#222]">
                   <CardHeader className="pb-3 border-b border-[#222]">
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
-                        <Users className="w-4 h-4 text-blue-400" /> Segmentação do Público-Alvo
-                      </CardTitle>
+                      <div>
+                        <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                          <Users className="w-4 h-4 text-blue-400" /> Segmentação do Público-Alvo
+                        </CardTitle>
+                        <CardDescription className="text-xs text-gray-400 mt-0.5">
+                          Escolha o grupo de destinatários para a mensagem de marketing
+                        </CardDescription>
+                      </div>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         onClick={loadClientesForMarketing}
                         disabled={loadingClientes}
-                        className="text-xs text-gray-400 hover:text-white h-7"
+                        className="text-xs text-[#D4AF37] hover:text-[#e5c04b] h-7"
                       >
-                        <RotateCw className={`w-3 h-3 mr-1 ${loadingClientes ? 'animate-spin' : ''}`} /> Atualizar Base
+                        <RotateCw className={`w-3 h-3 mr-1 ${loadingClientes ? 'animate-spin' : ''}`} /> Sincronizar Base & Agenda
                       </Button>
                     </div>
                   </CardHeader>
                   <CardContent className="pt-4 space-y-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setMarketingSegment('inativos_15')}
-                        className={`p-3 rounded-lg border text-left transition-all ${
-                          marketingSegment === 'inativos_15'
-                            ? 'bg-[#1a231d] border-[#25D366] text-white shadow-md'
-                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
-                        }`}
-                      >
-                        <p className="text-xs font-bold">Inativos 15+ dias</p>
-                        <p className="text-[11px] text-[#25D366] font-mono mt-0.5">
-                          {clientesList.filter(c => {
-                            if (!c.ultima_data) return true;
-                            const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-                            return d >= 15;
-                          }).length} clientes
-                        </p>
-                        <span className="text-[10px] text-gray-400 block mt-1">Hora de cortar de novo</span>
-                      </button>
+                    {/* Grupo 1: Clientes do App */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wider">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400" /> Clientes do App (Cadastrados / Histórico)
+                        </span>
+                        <span className="text-[11px] text-gray-400 font-mono">
+                          {clientesAppList.length} cadastrados
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('clientes_app_15')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'clientes_app_15'
+                              ? 'bg-[#1a231d] border-[#25D366] text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Inativos 15+ dias</p>
+                          <p className="text-[11px] text-[#25D366] font-mono mt-0.5">
+                            {clientesAppList.filter(c => {
+                              if (!c.ultima_data) return true;
+                              const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+                              return d >= 15;
+                            }).length} clientes
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">Hora de renovar o corte</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setMarketingSegment('inativos_30')}
-                        className={`p-3 rounded-lg border text-left transition-all ${
-                          marketingSegment === 'inativos_30'
-                            ? 'bg-[#251f15] border-amber-500 text-white shadow-md'
-                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
-                        }`}
-                      >
-                        <p className="text-xs font-bold">Inativos 30+ dias</p>
-                        <p className="text-[11px] text-amber-400 font-mono mt-0.5">
-                          {clientesList.filter(c => {
-                            if (!c.ultima_data) return true;
-                            const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-                            return d >= 30;
-                          }).length} clientes
-                        </p>
-                        <span className="text-[10px] text-gray-400 block mt-1">Reconquista / Sumidos</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('clientes_app_30')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'clientes_app_30'
+                              ? 'bg-[#251f15] border-amber-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Inativos 30+ dias</p>
+                          <p className="text-[11px] text-amber-400 font-mono mt-0.5">
+                            {clientesAppList.filter(c => {
+                              if (!c.ultima_data) return true;
+                              const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+                              return d >= 30;
+                            }).length} clientes
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">Reconquista / Sumidos</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setMarketingSegment('todos')}
-                        className={`p-3 rounded-lg border text-left transition-all ${
-                          marketingSegment === 'todos'
-                            ? 'bg-[#17212e] border-blue-500 text-white shadow-md'
-                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
-                        }`}
-                      >
-                        <p className="text-xs font-bold">Toda a Base</p>
-                        <p className="text-[11px] text-blue-400 font-mono mt-0.5">
-                          {clientesList.length} clientes
-                        </p>
-                        <span className="text-[10px] text-gray-400 block mt-1">Todos cadastrados</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMarketingSegment('teste')}
-                        className={`p-3 rounded-lg border text-left transition-all ${
-                          marketingSegment === 'teste'
-                            ? 'bg-[#291b29] border-purple-500 text-white shadow-md'
-                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
-                        }`}
-                      >
-                        <p className="text-xs font-bold">Somente Teste</p>
-                        <p className="text-[11px] text-purple-400 font-mono mt-0.5">
-                          1 contato
-                        </p>
-                        <span className="text-[10px] text-gray-400 block mt-1">Celular do Luan</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('clientes_app_todos')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'clientes_app_todos'
+                              ? 'bg-[#17212e] border-emerald-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Todos do App</p>
+                          <p className="text-[11px] text-emerald-400 font-mono mt-0.5">
+                            {clientesAppList.length} clientes
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">Toda a base cadastrada</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="p-2.5 bg-black/40 border border-[#2a2a2a] rounded-lg flex items-center justify-between text-xs">
+                    {/* Grupo 2: Leads da Agenda Evolution */}
+                    <div className="pt-2 border-t border-[#222]">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-purple-400 flex items-center gap-1.5 uppercase tracking-wider">
+                          <span className="w-2 h-2 rounded-full bg-purple-400" /> Leads da Agenda Telefônica (WhatsApp)
+                        </span>
+                        <span className="text-[11px] text-gray-400 font-mono">
+                          {leadsAgendaList.length} contatos
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('leads_agenda_30')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'leads_agenda_30'
+                              ? 'bg-[#241a29] border-purple-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Lote Seguro (30 Leads)</p>
+                          <p className="text-[11px] text-purple-400 font-mono mt-0.5">
+                            {Math.min(30, leadsAgendaList.length)} leads
+                          </p>
+                          <span className="text-[10px] text-emerald-400 block mt-1">Recomendado Anti-Ban</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('leads_agenda_50')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'leads_agenda_50'
+                              ? 'bg-[#241a29] border-purple-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Lote Médio (50 Leads)</p>
+                          <p className="text-[11px] text-purple-400 font-mono mt-0.5">
+                            {Math.min(50, leadsAgendaList.length)} leads
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">Disparo intermediário</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('leads_agenda_todos')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'leads_agenda_todos'
+                              ? 'bg-[#241a29] border-purple-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Todos os Leads</p>
+                          <p className="text-[11px] text-purple-400 font-mono mt-0.5">
+                            {leadsAgendaList.length} leads
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">Toda a agenda do WhatsApp</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Grupo 3: Base Geral e Teste */}
+                    <div className="pt-2 border-t border-[#222]">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('todos')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'todos'
+                              ? 'bg-[#17212e] border-blue-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Toda a Base Consolidada</p>
+                          <p className="text-[11px] text-blue-400 font-mono mt-0.5">
+                            {clientesAppList.length + leadsAgendaList.length} contatos únicos
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">App ({clientesAppList.length}) + Agenda ({leadsAgendaList.length})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMarketingSegment('teste')}
+                          className={`p-3 rounded-lg border text-left transition-all ${
+                            marketingSegment === 'teste'
+                              ? 'bg-[#291b29] border-pink-500 text-white shadow-md'
+                              : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">Somente Teste</p>
+                          <p className="text-[11px] text-pink-400 font-mono mt-0.5">
+                            1 contato (Luan)
+                          </p>
+                          <span className="text-[10px] text-gray-400 block mt-1">Disparo isolado de homologação</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-black/40 border border-[#2a2a2a] rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                       <span className="text-gray-300">
-                        Total selecionado para esta campanha: <strong className="text-white font-mono text-sm">{getFilteredClients().length} contatos</strong>
+                        Destinatários selecionados para este envio: <strong className="text-[#25D366] font-mono text-sm ml-1">{getFilteredClients().length} contatos</strong>
                       </span>
                       <span className="text-[11px] text-gray-400">
-                        {marketingSegment === 'teste' ? 'Disparo isolado de homologação' : 'Disparo sequencial com fila anti-ban'}
+                        {marketingSegment === 'teste' ? 'Disparo isolado de homologação' : 'Fila anti-ban: 20s-35s + Spintax'}
                       </span>
                     </div>
                   </CardContent>
@@ -2020,6 +2287,208 @@ function AdminWhatsAppContent() {
                 </Card>
               </div>
             </div>
+
+            {/* 4. EXPLORADOR VISUAL DE CONTATOS & LEADS (SEPARADOS) */}
+            <Card className="bg-[#141414] border-[#222] shadow-xl">
+              <CardHeader className="pb-3 border-b border-[#222]">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base text-white flex items-center gap-2">
+                      <Users className="w-5 h-5 text-[#D4AF37]" />
+                      Explorador de Contatos & Leads (Separados)
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-400 mt-0.5">
+                      Visualização completa e segmentada entre Clientes cadastrados no App e Contatos da Agenda Telefônica (Evolution API).
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={loadClientesForMarketing}
+                      disabled={loadingClientes}
+                      className="border-[#333] text-gray-300 hover:text-white h-8 text-xs"
+                    >
+                      <RotateCw className={`w-3.5 h-3.5 mr-1.5 ${loadingClientes ? 'animate-spin' : ''}`} />
+                      {loadingClientes ? 'Sincronizando...' : 'Atualizar Lista'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Filtros por Categoria e Busca */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3">
+                  {/* Abas Rápidas de Filtro */}
+                  <div className="flex items-center gap-1.5 p-1 bg-black/50 border border-[#2a2a2a] rounded-lg flex-wrap sm:flex-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => { setContactsFilterTab('todos'); setContactsVisibleLimit(60); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        contactsFilterTab === 'todos'
+                          ? 'bg-[#D4AF37] text-black font-bold shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Todos ({clientesAppList.length + leadsAgendaList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setContactsFilterTab('clientes_app'); setContactsVisibleLimit(60); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                        contactsFilterTab === 'clientes_app'
+                          ? 'bg-emerald-600 text-white font-bold shadow'
+                          : 'text-emerald-400 hover:text-emerald-300'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      Clientes do App ({clientesAppList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setContactsFilterTab('leads_agenda'); setContactsVisibleLimit(60); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                        contactsFilterTab === 'leads_agenda'
+                          ? 'bg-purple-600 text-white font-bold shadow'
+                          : 'text-purple-400 hover:text-purple-300'
+                      }`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-purple-400" />
+                      Leads da Agenda ({leadsAgendaList.length})
+                    </button>
+                  </div>
+
+                  {/* Campo de Pesquisa Textual */}
+                  <div className="relative flex-1 sm:max-w-xs">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      type="text"
+                      placeholder="Buscar por nome ou telefone..."
+                      value={contactsSearch}
+                      onChange={(e) => { setContactsSearch(e.target.value); setContactsVisibleLimit(60); }}
+                      className="pl-9 bg-[#18181b] border-[#333] text-white text-xs h-9"
+                    />
+                    {contactsSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setContactsSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="p-0">
+                {/* Lista / Tabela de Contatos */}
+                {loadingClientes ? (
+                  <div className="py-12 flex flex-col items-center justify-center text-gray-400 space-y-2">
+                    <Loader2 className="w-8 h-8 animate-spin text-[#D4AF37]" />
+                    <p className="text-xs">Sincronizando clientes do App e contatos da Evolution API...</p>
+                  </div>
+                ) : getFilteredContactsForExplorer().length === 0 ? (
+                  <div className="py-12 text-center text-gray-400 text-xs">
+                    Nenhum contato encontrado para os filtros selecionados.
+                  </div>
+                ) : (
+                  <div>
+                    <div className="max-h-[520px] overflow-y-auto divide-y divide-[#222]">
+                      {getFilteredContactsForExplorer().slice(0, contactsVisibleLimit).map((c, idx) => (
+                        <div
+                          key={c.id || `${c.telefone}-${idx}`}
+                          className="p-3 sm:px-4 flex items-center justify-between hover:bg-[#1a1a1e] transition-colors gap-3"
+                        >
+                          {/* Coluna Esquerda: Avatar + Nome + Origem */}
+                          <div className="flex items-center gap-3 min-w-0">
+                            {/* Avatar */}
+                            <div className="w-10 h-10 rounded-full bg-[#222] border border-[#333] overflow-hidden flex items-center justify-center shrink-0">
+                              {c.profilePicUrl ? (
+                                <img
+                                  src={c.profilePicUrl}
+                                  alt={c.nome}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => { e.target.style.display = 'none'; }}
+                                />
+                              ) : (
+                                <span className={`text-xs font-bold ${c.tipo === 'cliente_app' ? 'text-emerald-400' : 'text-purple-400'}`}>
+                                  {(c.nome || 'C').slice(0, 2).toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Detalhes */}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-semibold text-white truncate max-w-[200px] sm:max-w-xs">
+                                  {c.nome}
+                                </span>
+                                {c.tipo === 'cliente_app' ? (
+                                  <Badge className="bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 text-[10px] px-1.5 py-0">
+                                    🟢 Cliente do App ({c.origem || 'Cadastro'})
+                                  </Badge>
+                                ) : (
+                                  <Badge className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[10px] px-1.5 py-0">
+                                    🟣 Lead Agenda Evolution
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-gray-400 mt-0.5">
+                                <span className="font-mono text-gray-300">
+                                  {formatPhoneNumber(c.telefone)}
+                                </span>
+                                <span className="text-gray-500">•</span>
+                                <span className="text-[11px] text-gray-400">
+                                  {c.ultima_data ? (
+                                    <span>Último corte: <strong className="text-amber-300">{formatDateBR(c.ultima_data)}</strong></span>
+                                  ) : (
+                                    <span className="text-gray-500">Sem agendamentos registrados</span>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Coluna Direita: Ações */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <a
+                              href={`https://wa.me/55${c.telefone.slice(-11)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1.5 bg-[#25D366]/10 hover:bg-[#25D366]/20 border border-[#25D366]/30 text-[#25D366] rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors"
+                              title="Conversar no WhatsApp"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">WhatsApp</span>
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Rodapé da Tabela: Paginação / Contagem */}
+                    <div className="p-3 bg-black/40 border-t border-[#222] flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+                      <span className="text-gray-400">
+                        Mostrando <strong className="text-white">{Math.min(contactsVisibleLimit, getFilteredContactsForExplorer().length)}</strong> de{' '}
+                        <strong className="text-white">{getFilteredContactsForExplorer().length}</strong> contatos filtrados.
+                      </span>
+
+                      {getFilteredContactsForExplorer().length > contactsVisibleLimit && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setContactsVisibleLimit(prev => prev + 60)}
+                          className="h-7 text-xs border-[#333] text-gray-300 hover:text-white"
+                        >
+                          Carregar Mais 60 Contatos (+{getFilteredContactsForExplorer().length - contactsVisibleLimit} restantes)
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           

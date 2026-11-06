@@ -252,6 +252,37 @@ export const evolutionApi = {
   },
 
   /**
+   * Busca todos os contatos individuais sincronizados na agenda da Evolution API
+   */
+  async getContacts(instanceName = this.getInstanceName()) {
+    try {
+      const res = await this.request(`/chat/findContacts/${instanceName}`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      if (Array.isArray(res.data)) {
+        return res.data
+          .filter(c => !c.isGroup && c.remoteJid && c.remoteJid.includes('@s.whatsapp.net'))
+          .map(c => {
+            const rawPhone = (c.remoteJid || '').split('@')[0].replace(/\D/g, '');
+            return {
+              id: c.id || rawPhone,
+              nome: (c.pushName || c.name || 'Lead WhatsApp').trim(),
+              telefone: rawPhone,
+              profilePicUrl: c.profilePicUrl || null,
+              origem: 'agenda_evolution'
+            };
+          })
+          .filter(c => c.telefone && c.telefone.length >= 8);
+      }
+      return [];
+    } catch (error) {
+      console.warn('Erro ao buscar contatos da Evolution API:', error);
+      return [];
+    }
+  },
+
+  /**
    * Envia presença no WhatsApp (ex: 'composing' para simular "digitando...", 'paused' para parar)
    * Essencial para a Meta registrar atividade humana antes do disparo de mensagens automáticas.
    */
