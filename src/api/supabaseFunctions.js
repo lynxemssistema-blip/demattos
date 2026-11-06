@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { evolutionApi } from '@/api/evolutionClient';
 
 export async function invokeSupabaseFunction(functionName, params = {}) {
@@ -286,13 +286,76 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
       }
 
       case 'getAdminAgendamentos': {
-        let query = supabase.from('agendamento').select('*').order('data', { ascending: false }).order('horario');
+        // 1. Obter todos os agendamentos ordenados por created_date para gerar número único sequencial permanente
+        const { data: todosAgs } = await supabaseAdmin
+          .from('agendamento')
+          .select('id, created_date')
+          .order('created_date', { ascending: true });
+
+        const numeroMap = new Map();
+        (todosAgs || []).forEach((ag, idx) => {
+          numeroMap.set(ag.id, 1001 + idx);
+        });
+
+        // 2. Buscar agendamentos filtrados
+        let query = supabaseAdmin.from('agendamento').select('*').order('data', { ascending: false }).order('horario');
         if (params.dataInicio) {
           query = query.gte('data', params.dataInicio);
         }
-        const { data, error } = await query;
+        const { data: agendamentosRaw, error } = await query;
         if (error) throw error;
-        return { data: { success: true, agendamentos: data || [] } };
+
+        // 3. Buscar histórico de mensagens da tabela conversa_whatsapp
+        const { data: msgsDb } = await supabaseAdmin
+          .from('conversa_whatsapp')
+          .select('id, telefone_cliente, mensagem, dados_extraidos, created_date')
+          .order('created_date', { ascending: false });
+
+        const msgsByAgendamento = {};
+        (msgsDb || []).forEach(msg => {
+          const agId = msg.dados_extraidos?.agendamento_id;
+          if (agId) {
+            if (!msgsByAgendamento[agId]) msgsByAgendamento[agId] = [];
+            msgsByAgendamento[agId].push({
+              id: msg.id,
+              tipo: msg.dados_extraidos?.tipo || 'confirmacao',
+              telefone: msg.telefone_cliente,
+              mensagem: msg.mensagem,
+              data_envio: msg.created_date,
+              modo: msg.dados_extraidos?.modo_operacao || 'oficial'
+            });
+          }
+        });
+
+        // 4. Formatar cada agendamento com número único e suas mensagens de WhatsApp
+        const agendamentosFormatados = (agendamentosRaw || []).map(ag => {
+          const numSeq = numeroMap.get(ag.id) || (1001 + Math.abs(ag.id.split('-')[0].split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 9000));
+          return {
+            ...ag,
+            numero_agendamento: numSeq,
+            codigo_unico: `#${numSeq}`,
+            mensagens_whatsapp: msgsByAgendamento[ag.id] || []
+          };
+        });
+
+        return { data: { success: true, agendamentos: agendamentosFormatados } };
+      }
+
+      case 'enviarWhatsAppAgendamento': {
+        const targetId = params?.id || params?.agendamento_id || params?.agendamentoId;
+        if (!targetId) return { data: { error: 'ID do agendamento não informado.' } };
+
+        const { data: ag, error: agErr } = await supabaseAdmin
+          .from('agendamento')
+          .select('*')
+          .eq('id', targetId)
+          .maybeSingle();
+
+        if (agErr || !ag) return { data: { error: 'Agendamento não encontrado.' } };
+
+        const tipo = params.tipo || 'confirmacao';
+        const res = await evolutionApi.sendAppointmentNotification(tipo, ag);
+        return { data: { success: !!res?.success, res } };
       }
 
       case 'getMinhasCompras': {
@@ -968,12 +1031,74 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         return { data: { success: true } };
       }
 
+      case 'excluirAgendamento':
+      case 'deletarAgendamento':
+      case 'deleteAgendamento': {
+        const targetId = params?.id || params?.agendamento_id || params?.agendamentoId;
+        if (!targetId) {
+          return { data: { error: 'ID do agendamento não informado.' } };
+        }
+
+        // 1. Buscar agendamento antes de excluir para liberar horários na agenda
+        const { data: agExistente } = await supabaseAdmin
+          .from('agendamento')
+          .select('*')
+          .eq('id', targetId)
+          .maybeSingle();
+
+        // 2. Liberar horário na tabela horario_disponivel
+        if (agExistente && agExistente.profissional_id && agExistente.data && agExistente.horario) {
+          try {
+            await supabaseAdmin
+              .from('horario_disponivel')
+              .update({ disponivel: true })
+              .eq('profissional_id', agExistente.profissional_id)
+              .eq('data', agExistente.data)
+              .eq('horario', agExistente.horario);
+          } catch (eHorario) {
+            console.warn('[excluirAgendamento] Erro ao liberar horario:', eHorario);
+          }
+        }
+
+        // 3. Excluir permanentemente o agendamento (permitido em qualquer status: confirmado, pendente, etc.)
+        const { error } = await supabaseAdmin
+          .from('agendamento')
+          .delete()
+          .eq('id', targetId);
+
+        if (error) throw error;
+
+        return { data: { success: true, deleted: true, id: targetId } };
+      }
+
       case 'cancelarMeuAgendamento':
       case 'cancelarAgendamento': {
         const targetId = params?.id || params?.agendamento_id || params?.agendamentoId;
         if (!targetId) {
           return { data: { error: 'ID do agendamento não informado.' } };
         }
+
+        // 1. Buscar agendamento atual e liberar horário
+        const { data: agAtual } = await supabaseAdmin
+          .from('agendamento')
+          .select('*')
+          .eq('id', targetId)
+          .maybeSingle();
+
+        if (agAtual && agAtual.profissional_id && agAtual.data && agAtual.horario) {
+          try {
+            await supabaseAdmin
+              .from('horario_disponivel')
+              .update({ disponivel: true })
+              .eq('profissional_id', agAtual.profissional_id)
+              .eq('data', agAtual.data)
+              .eq('horario', agAtual.horario);
+          } catch (eHorario) {
+            console.warn('[cancelarAgendamento] Erro ao liberar horario:', eHorario);
+          }
+        }
+
+        // 2. Atualizar status para cancelado (funciona para confirmado, pendente, etc.)
         const { data, error } = await supabaseAdmin
           .from('agendamento')
           .update({ status: 'cancelado' })
@@ -983,7 +1108,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         if (error) throw error;
 
-        // Disparo de notificação de cancelamento WhatsApp para o cliente
+        // 3. Disparo de notificação de cancelamento WhatsApp para o cliente
         if (data) {
           evolutionApi.sendAppointmentNotification('cancelamento', data).catch(err => {
             console.warn('[WhatsApp] Aviso ao enviar cancelamento ao cliente:', err);
@@ -991,7 +1116,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
           // Notificar também o barbeiro sobre o cancelamento
           if (data.profissional_id) {
-            supabase.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle().then(({ data: prof }) => {
+            supabaseAdmin.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle().then(({ data: prof }) => {
               evolutionApi.notifyBarberCancellation(data, prof?.telefone).catch(err => {
                 console.warn('[WhatsApp] Aviso ao enviar cancelamento ao barbeiro:', err);
               });

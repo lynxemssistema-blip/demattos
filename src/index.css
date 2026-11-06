@@ -85,4 +85,26 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Garantir que inputs de hora, número e texto em tema escuro tenham texto 100% legível e branco */
+  input[type="time"],
+  input[type="number"],
+  input[type="text"],
+  input[type="date"],
+  input[type="email"],
+  input[type="tel"] {
+    color: #ffffff !important;
+    color-scheme: dark !important;
+  }
+
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.3) !important;
+    cursor: pointer;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #888888 !important;
+  }
 }

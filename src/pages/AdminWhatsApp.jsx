@@ -623,7 +623,8 @@ function AdminWhatsAppContent() {
                         }
                       }}
                       placeholder="5531973651924"
-                      className="h-8 text-xs w-36 bg-[#1a1a1a] border-[#444] text-amber-300 font-mono font-bold focus:border-[#D4AF37]"
+                      className="h-9 text-xs w-44 bg-[#141414] border-2 border-amber-500/50 text-amber-300 font-mono font-bold focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] px-3 rounded shadow-inner"
+                      style={{ color: '#FCD34D', backgroundColor: '#141414', colorScheme: 'dark' }}
                     />
                   </div>
                 </div>
@@ -839,7 +840,7 @@ function AdminWhatsAppContent() {
                           <span className="text-xs text-gray-400">Ativar:</span>
                           <Switch
                             checked={settings.confirmacao_ativa}
-                            onCheckedChange={(c) => setSettings({ ...settings, confirmacao_ativa: c })}
+                            onCheckedChange={(c) => handleToggleOrUpdateSetting('confirmacao_ativa', c, c ? 'Confirmação ativada no banco!' : 'Confirmação desativada no banco!')}
                           />
                         </div>
                       </div>
@@ -882,7 +883,7 @@ function AdminWhatsAppContent() {
                           <span className="text-xs text-gray-400">Ativar:</span>
                           <Switch
                             checked={settings.cancelamento_ativo}
-                            onCheckedChange={(c) => setSettings({ ...settings, cancelamento_ativo: c })}
+                            onCheckedChange={(c) => handleToggleOrUpdateSetting('cancelamento_ativo', c, c ? 'Cancelamento ativado no banco!' : 'Cancelamento desativado no banco!')}
                           />
                         </div>
                       </div>
@@ -927,7 +928,7 @@ function AdminWhatsAppContent() {
                           <span className="text-xs text-gray-400">Ativar:</span>
                           <Switch
                             checked={settings.lembrete_ativo}
-                            onCheckedChange={(c) => setSettings({ ...settings, lembrete_ativo: c })}
+                            onCheckedChange={(c) => handleToggleOrUpdateSetting('lembrete_ativo', c, c ? 'Lembrete ativado no banco!' : 'Lembrete desativado no banco!')}
                           />
                         </div>
                       </div>
@@ -972,7 +973,7 @@ function AdminWhatsAppContent() {
                           <span className="text-xs text-gray-400">Ativar:</span>
                           <Switch
                             checked={settings.notificar_barbeiro_ativo}
-                            onCheckedChange={(c) => setSettings({ ...settings, notificar_barbeiro_ativo: c })}
+                            onCheckedChange={(c) => handleToggleOrUpdateSetting('notificar_barbeiro_ativo', c, c ? 'Notificação ao barbeiro ativada no banco!' : 'Notificação ao barbeiro desativada no banco!')}
                           />
                         </div>
                       </div>
@@ -1537,28 +1538,30 @@ function AdminWhatsAppContent() {
                     </label>
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
-                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Mínimo (seg):</span>
+                        <span className="text-xs text-amber-300 block mb-1 font-semibold">Mínimo (seg):</span>
                         <Input
                           type="number"
                           min="1"
-                          max="60"
+                          max="600"
                           value={settings.antiban_delay_min}
                           onChange={(e) => setSettings({ ...settings, antiban_delay_min: Number(e.target.value) })}
                           onBlur={(e) => handleToggleOrUpdateSetting('antiban_delay_min', Number(e.target.value), 'Delay mínimo salvo no banco!')}
-                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
+                          className="bg-[#141414] border-2 border-[#555] text-white font-extrabold text-sm font-mono h-10 px-3 focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/50 rounded-md shadow-inner"
+                          style={{ color: '#FFFFFF', backgroundColor: '#141414', colorScheme: 'dark' }}
                         />
                       </div>
-                      <span className="text-gray-500 pt-4 font-bold">até</span>
+                      <span className="text-gray-400 pt-5 font-bold text-sm">até</span>
                       <div className="flex-1">
-                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Máximo (seg):</span>
+                        <span className="text-xs text-amber-300 block mb-1 font-semibold">Máximo (seg):</span>
                         <Input
                           type="number"
                           min="1"
-                          max="120"
+                          max="1200"
                           value={settings.antiban_delay_max}
                           onChange={(e) => setSettings({ ...settings, antiban_delay_max: Number(e.target.value) })}
                           onBlur={(e) => handleToggleOrUpdateSetting('antiban_delay_max', Number(e.target.value), 'Delay máximo salvo no banco!')}
-                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
+                          className="bg-[#141414] border-2 border-[#555] text-white font-extrabold text-sm font-mono h-10 px-3 focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/50 rounded-md shadow-inner"
+                          style={{ color: '#FFFFFF', backgroundColor: '#141414', colorScheme: 'dark' }}
                         />
                       </div>
                     </div>
@@ -1594,23 +1597,25 @@ function AdminWhatsAppContent() {
                   {settings.antiban_janela_ativa && (
                     <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
                       <div>
-                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Início dos Disparos:</span>
+                        <span className="text-xs text-amber-300 block mb-1 font-semibold">Início dos Disparos:</span>
                         <Input
                           type="time"
                           value={settings.antiban_janela_inicio}
                           onChange={(e) => setSettings({ ...settings, antiban_janela_inicio: e.target.value })}
                           onBlur={(e) => handleToggleOrUpdateSetting('antiban_janela_inicio', e.target.value, 'Início dos disparos salvo no banco!')}
-                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
+                          className="bg-[#141414] border-2 border-[#555] text-white font-extrabold text-sm font-mono h-10 px-3 focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/50 rounded-md shadow-inner"
+                          style={{ color: '#FFFFFF', backgroundColor: '#141414', colorScheme: 'dark' }}
                         />
                       </div>
                       <div>
-                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Fim dos Disparos:</span>
+                        <span className="text-xs text-amber-300 block mb-1 font-semibold">Fim dos Disparos:</span>
                         <Input
                           type="time"
                           value={settings.antiban_janela_fim}
                           onChange={(e) => setSettings({ ...settings, antiban_janela_fim: e.target.value })}
                           onBlur={(e) => handleToggleOrUpdateSetting('antiban_janela_fim', e.target.value, 'Fim dos disparos salvo no banco!')}
-                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
+                          className="bg-[#141414] border-2 border-[#555] text-white font-extrabold text-sm font-mono h-10 px-3 focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/50 rounded-md shadow-inner"
+                          style={{ color: '#FFFFFF', backgroundColor: '#141414', colorScheme: 'dark' }}
                         />
                       </div>
                     </div>

@@ -434,6 +434,8 @@ export const evolutionApi = {
       .replace(/\{\{\s*horario\s*\}\}/gi, data.horario || '')
       .replace(/\{\{\s*endereco\s*\}\}/gi, data.endereco || 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem')
       .replace(/\{\{\s*telefone_barbearia\s*\}\}/gi, data.telefone_barbearia || '(31) 97365-1924')
+      .replace(/\{\{\s*numero_agendamento\s*\}\}/gi, data.codigo_unico || (data.numero_agendamento ? `#${data.numero_agendamento}` : ''))
+      .replace(/\{\{\s*codigo_agendamento\s*\}\}/gi, data.codigo_unico || (data.numero_agendamento ? `#${data.numero_agendamento}` : ''))
       .replace(/\{\{\s*observacoes\s*\}\}/gi, data.observacoes || data.message || 'Nenhuma');
 
     if (applySpintax) {

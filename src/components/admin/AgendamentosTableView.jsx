@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Trash2, Zap, User } from 'lucide-react';
+import { Trash2, Zap, User, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -37,6 +37,7 @@ export default function AgendamentosTableView({
         <table className="w-full">
           <thead>
             <tr className="border-b border-[#2a2a2a]">
+              <th className="text-left p-4 text-gray-400 font-medium">Nº</th>
               <th className="text-left p-4 text-gray-400 font-medium">Data</th>
               <th className="text-left p-4 text-gray-400 font-medium">Horário</th>
               <th className="text-left p-4 text-gray-400 font-medium">Cliente</th>
@@ -65,6 +66,9 @@ export default function AgendamentosTableView({
             
             return (
               <tr key={agendamento.id} className="border-b border-[#2a2a2a] hover:bg-[#1a1a1a] transition-colors">
+                <td className="p-4 text-[#D4AF37] font-mono font-bold text-xs whitespace-nowrap">
+                  {agendamento.codigo_unico || (`#${agendamento.numero_agendamento || '---'}`)}
+                </td>
                 <td className="p-4 text-white">
                   <button
                     onClick={() => onOpenDailyAgenda(agendamento.profissional_id, agendamento.data)}
@@ -107,6 +111,20 @@ export default function AgendamentosTableView({
                         </TooltipTrigger>
                         <TooltipContent className="bg-[#1a1a1a] border-blue-500/30">
                           <p className="text-xs">Confirmado manualmente</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                    {agendamento.mensagens_whatsapp && agendamento.mensagens_whatsapp.length > 0 && (
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <div className="flex items-center gap-1 bg-[#25D366]/20 text-[#25D366] px-1.5 py-0.5 rounded text-[11px] border border-[#25D366]/40 cursor-default">
+                            <MessageSquare className="w-3 h-3" />
+                            <span className="font-bold">{agendamento.mensagens_whatsapp.length}</span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent className="bg-[#0b141a] border-[#25D366]/40 max-w-xs text-xs text-gray-200 p-2.5">
+                          <p className="font-bold text-[#25D366] mb-1">WhatsApp Enviado:</p>
+                          <p className="line-clamp-3">{agendamento.mensagens_whatsapp[0]?.mensagem}</p>
                         </TooltipContent>
                       </Tooltip>
                     )}

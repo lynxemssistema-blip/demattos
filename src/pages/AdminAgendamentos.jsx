@@ -106,7 +106,7 @@ function AdminAgendamentosContent() {
   // Agora apenas chama a função backend que centraliza a lógica
   const deleteAgendamentoMutation = useMutation({
     mutationFn: async (id) => {
-      const response = await base44.functions.invoke('cancelarAgendamento', {
+      const response = await base44.functions.invoke('excluirAgendamento', {
         agendamentoId: id,
         id: id,
         agendamento_id: id
@@ -186,9 +186,19 @@ function AdminAgendamentosContent() {
       if (!ag || typeof ag !== 'object') return false;
       if (!ag.cliente_nome || !ag.cliente_telefone) return false;
       
-      // Filtro de busca por nome (com optional chaining)
+      // Filtro de busca por nome, telefone e número único do agendamento
+      const searchLower = searchTerm.trim().toLowerCase();
+      const cleanSearch = searchTerm.replace(/\D/g, '');
       const clienteNome = String(ag.cliente_nome || '').toLowerCase();
-      const matchSearch = clienteNome.includes(searchTerm.toLowerCase());
+      const clienteTelefone = String(ag.cliente_telefone || '').replace(/\D/g, '');
+      const codigoUnico = String(ag.codigo_unico || '').toLowerCase();
+      const numStr = String(ag.numero_agendamento || '');
+
+      const matchSearch = !searchLower ||
+        clienteNome.includes(searchLower) ||
+        (cleanSearch && clienteTelefone.includes(cleanSearch)) ||
+        codigoUnico.includes(searchLower) ||
+        (cleanSearch && numStr.includes(cleanSearch));
       
       // Filtro de status
       let matchStatus = true;

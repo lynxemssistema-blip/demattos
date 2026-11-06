@@ -1,9 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { base44 } from '@/api/base44Client';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { User, Phone, Calendar, Clock, Trash2, Zap } from 'lucide-react';
+import { User, Phone, Calendar, Clock, Trash2, Zap, MessageSquare, Send, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -24,6 +27,35 @@ export default function AgendamentosListView({
   onDelete,
   onOpenDailyAgenda
 }) {
+  const queryClient = useQueryClient();
+  const [sendingWhatsappId, setSendingWhatsappId] = useState(null);
+  const [expandedWhatsapp, setExpandedWhatsapp] = useState({});
+
+  const toggleWhatsapp = (id) => {
+    setExpandedWhatsapp(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleDispararWhatsApp = async (agendamento) => {
+    setSendingWhatsappId(agendamento.id);
+    try {
+      const res = await base44.functions.invoke('enviarWhatsAppAgendamento', {
+        agendamentoId: agendamento.id,
+        id: agendamento.id
+      });
+      if (res.data?.success) {
+        toast.success(`Mensagem WhatsApp disparada com sucesso para ${agendamento.cliente_telefone}!`);
+        queryClient.invalidateQueries(['agendamentos']);
+        setExpandedWhatsapp(prev => ({ ...prev, [agendamento.id]: true }));
+      } else {
+        toast.error('Erro ao disparar WhatsApp: ' + (res.data?.error || 'Falha no envio'));
+      }
+    } catch (e) {
+      toast.error('Erro ao enviar WhatsApp: ' + e.message);
+    } finally {
+      setSendingWhatsappId(null);
+    }
+  };
+
   // ✅ CORREÇÃO #3: Memoizar para evitar re-renders excessivos em mobile
   const clientesMap = useMemo(() => {
     const map = {};
@@ -85,10 +117,15 @@ export default function AgendamentosListView({
                   </div>
 
                   <div className="space-y-3 flex-1">
-                     <div className="flex flex-col gap-3">
-                       <span className="text-white font-semibold">{agendamento.cliente_nome}</span>
+                     <div className="flex flex-col gap-2">
                        <div className="flex items-center gap-2 flex-wrap">
-                         <Badge className={`${statusColors[agendamento.status]} border`}>
+                         <span className="text-white font-semibold text-base">{agendamento.cliente_nome}</span>
+                         <Badge className="bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/60 font-mono font-bold text-xs px-2.5 py-0.5 shadow-sm">
+                           Nº {agendamento.codigo_unico || (`#${agendamento.numero_agendamento || '---'}`)}
+                         </Badge>
+                       </div>
+                       <div className="flex items-center gap-2 flex-wrap">
+                         <Badge className={`${statusColors[agendamento.status]} border font-semibold`}>
                            {agendamento.status}
                          </Badge>
                          {agendamento.status === 'confirmado' && agendamento.confirmado_automaticamente && (
@@ -187,6 +224,78 @@ export default function AgendamentosListView({
                         <span className="text-[#D4AF37]">Obs:</span> {agendamento.observacoes}
                       </div>
                     )}
+
+                    {/* Seção das Mensagens WhatsApp enviadas para este agendamento */}
+                    <div className="mt-3 pt-3 border-t border-[#2a2a2a] space-y-2">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleWhatsapp(agendamento.id)}
+                          className="flex items-center gap-1.5 text-xs font-semibold text-[#25D366] hover:text-[#20ba5a] transition-colors"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>
+                            WhatsApp ({agendamento.mensagens_whatsapp?.length || 0} {(agendamento.mensagens_whatsapp?.length === 1) ? 'mensagem enviada' : 'mensagens enviadas'})
+                          </span>
+                          {expandedWhatsapp[agendamento.id] ? (
+                            <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                          )}
+                        </button>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDispararWhatsApp(agendamento)}
+                          disabled={sendingWhatsappId === agendamento.id}
+                          className="h-7 text-xs border-[#25D366]/40 text-[#25D366] hover:bg-[#25D366]/10 px-2.5 py-0 flex items-center gap-1.5"
+                          title="Disparar confirmação WhatsApp para este agendamento"
+                        >
+                          {sendingWhatsappId === agendamento.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Send className="w-3 h-3" />
+                          )}
+                          <span>{agendamento.mensagens_whatsapp?.length > 0 ? 'Reenviar WhatsApp' : 'Disparar WhatsApp'}</span>
+                        </Button>
+                      </div>
+
+                      {/* Lista de mensagens enviadas (expandida por padrão se houver mensagens) */}
+                      {(expandedWhatsapp[agendamento.id] ?? (agendamento.mensagens_whatsapp?.length > 0)) && (
+                        <div className="space-y-2 pt-1">
+                          {agendamento.mensagens_whatsapp && agendamento.mensagens_whatsapp.length > 0 ? (
+                            agendamento.mensagens_whatsapp.map((msg, idx) => (
+                              <div
+                                key={msg.id || idx}
+                                className="bg-[#0b141a] border border-[#25D366]/30 rounded-lg p-3 text-xs shadow-md space-y-1.5"
+                              >
+                                <div className="flex items-center justify-between pb-1.5 border-b border-[#25D366]/20 text-[11px]">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-[#25D366] inline-block animate-pulse"></span>
+                                    <span className="text-[#25D366] font-bold uppercase tracking-wider">
+                                      {msg.tipo === 'confirmacao' ? '✅ Confirmação Enviada' : msg.tipo === 'cancelamento' ? '❌ Cancelamento Enviado' : '🔔 Notificação Enviada'}
+                                    </span>
+                                    <span className="text-gray-400 font-mono">({msg.telefone})</span>
+                                  </div>
+                                  <span className="text-gray-400 font-mono text-[10px]">
+                                    {msg.data_envio ? formatInTimeZone(new Date(msg.data_envio), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm', { locale: ptBR }) : ''}
+                                  </span>
+                                </div>
+                                <div className="text-gray-200 whitespace-pre-wrap font-sans text-xs leading-relaxed bg-[#111b21] p-3 rounded border border-[#222]">
+                                  {msg.mensagem}
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="bg-[#111b21]/70 border border-dashed border-[#333] rounded-lg p-2.5 text-center text-xs text-gray-400">
+                              Nenhuma mensagem de WhatsApp registrada para este agendamento até o momento.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
