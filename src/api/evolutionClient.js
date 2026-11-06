@@ -92,7 +92,24 @@ Acesse o painel para acompanhar sua agenda!`,
 🛠️ *Serviço:* {{servico}}
 📅 *Data:* {{data}} às {{horario}}
 
-O horário foi liberado novamente na sua agenda.`
+O horário foi liberado novamente na sua agenda.`,
+
+  marketing: `💈 *Barbearia DeMattos* | *Sua Imagem, Seu Sucesso* ✂️🔥
+
+{{saudacao_periodo}}, *{{cliente_primeiro_nome}}*! {Tudo bem com você?|Como você está?|Esperamos que seu dia esteja excelente!}
+
+Você já reparou na diferença que faz um corte alinhado e uma barba bem cuidada na sua rotina? 💼✨
+
+Cuidar do seu visual vai muito além da estética: é sobre *autoestima, autoconfiança e a presença que você transmite em cada ambiente*. Quando você se olha no espelho e se sente impecável, suas reuniões, decisões e momentos de lazer ganham outra energia.
+
+Aqui na *Barbearia DeMattos*, nosso compromisso é valorizar a sua melhor versão com técnica, visagismo e atendimento de alto padrão.
+
+✂️ {Que tal renovar seu estilo para os próximos dias?|Está na hora de dar aquele trato no visual?|Seu estilo e bem-estar merecem esse cuidado.}
+
+📲 *Agende seu próximo horário com facilidade pelo nosso site:*
+👉 https://demattos.lynxems.com.br
+
+_Te esperamos para um café especial e um atendimento diferenciado!_ ☕💈`
 };
 
 export const evolutionApi = {
@@ -507,6 +524,9 @@ export const evolutionApi = {
         template_cancelamento: map.whatsapp_template_cancelamento || DEFAULT_TEMPLATES.cancelamento,
         template_lembrete: map.whatsapp_template_lembrete || DEFAULT_TEMPLATES.lembrete,
         template_aviso_barbeiro: map.whatsapp_template_aviso_barbeiro || DEFAULT_TEMPLATES.aviso_barbeiro,
+        template_marketing: map.whatsapp_template_marketing || DEFAULT_TEMPLATES.marketing,
+        marketing_imagem_url: map.whatsapp_marketing_imagem_url || DEFAULT_LOGO_URL,
+        marketing_incluir_imagem: map.whatsapp_marketing_incluir_imagem !== 'false',
       };
     } catch (e) {
       console.error('Erro ao carregar configurações de WhatsApp:', e);
@@ -540,6 +560,9 @@ export const evolutionApi = {
         template_cancelamento: DEFAULT_TEMPLATES.cancelamento,
         template_lembrete: DEFAULT_TEMPLATES.lembrete,
         template_aviso_barbeiro: DEFAULT_TEMPLATES.aviso_barbeiro,
+        template_marketing: DEFAULT_TEMPLATES.marketing,
+        marketing_imagem_url: DEFAULT_LOGO_URL,
+        marketing_incluir_imagem: true,
       };
     }
   },
@@ -602,6 +625,9 @@ export const evolutionApi = {
         { chave: 'whatsapp_template_cancelamento', valor: settings.template_cancelamento, descricao: 'Modelo de mensagem de cancelamento' },
         { chave: 'whatsapp_template_lembrete', valor: settings.template_lembrete, descricao: 'Modelo de mensagem de lembrete' },
         { chave: 'whatsapp_template_aviso_barbeiro', valor: settings.template_aviso_barbeiro, descricao: 'Modelo de mensagem de aviso ao barbeiro' },
+        { chave: 'whatsapp_template_marketing', valor: settings.template_marketing || DEFAULT_TEMPLATES.marketing, descricao: 'Modelo de mensagem de marketing e autoestima' },
+        { chave: 'whatsapp_marketing_imagem_url', valor: settings.marketing_imagem_url || DEFAULT_LOGO_URL, descricao: 'URL da imagem da campanha de marketing' },
+        { chave: 'whatsapp_marketing_incluir_imagem', valor: String(settings.marketing_incluir_imagem !== false), descricao: 'Incluir imagem na campanha de marketing' },
       ];
 
       for (const item of items) {

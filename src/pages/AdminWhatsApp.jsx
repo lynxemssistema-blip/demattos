@@ -52,8 +52,14 @@ import {
   Activity,
   Flame,
   CheckCheck,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Users,
+  Megaphone,
+  Play,
+  Square,
+  RotateCcw
 } from 'lucide-react';
+import { supabaseAdmin } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
 
@@ -107,10 +113,22 @@ function AdminWhatsAppContent() {
     template_cancelamento: DEFAULT_TEMPLATES.cancelamento,
     template_lembrete: DEFAULT_TEMPLATES.lembrete,
     template_aviso_barbeiro: DEFAULT_TEMPLATES.aviso_barbeiro,
+    template_marketing: DEFAULT_TEMPLATES.marketing,
+    marketing_imagem_url: DEFAULT_LOGO_URL,
+    marketing_incluir_imagem: true,
   });
 
   const [savingSettings, setSavingSettings] = useState(false);
   const [activeTemplateTab, setActiveTemplateTab] = useState('confirmacao');
+
+  // Estados de Marketing & Campanhas
+  const [marketingSegment, setMarketingSegment] = useState('inativos_15');
+  const [clientesList, setClientesList] = useState([]);
+  const [loadingClientes, setLoadingClientes] = useState(false);
+  const [campaignRunning, setCampaignRunning] = useState(false);
+  const [campaignProgress, setCampaignProgress] = useState({ total: 0, current: 0, sent: 0, failed: 0, nextCountdown: 0, currentContact: '' });
+  const [campaignLogs, setCampaignLogs] = useState([]);
+  const campaignStopRef = useRef(false);
 
   // Envio de teste manual
   const [testNumber, setTestNumber] = useState('');
@@ -124,6 +142,7 @@ function AdminWhatsAppContent() {
   useEffect(() => {
     loadStatusAndDetails(true);
     loadSettings();
+    loadClientesForMarketing();
 
     // Polling a cada 5 segundos
     pollIntervalRef.current = setInterval(() => {
@@ -155,6 +174,41 @@ function AdminWhatsAppContent() {
     const data = await evolutionApi.getWhatsAppSettings();
     if (data) {
       setSettings(data);
+    }
+  };
+
+  const loadClientesForMarketing = async () => {
+    setLoadingClientes(true);
+    try {
+      const [resCli, resAg] = await Promise.all([
+        supabaseAdmin.from('cliente').select('id, nome, telefone'),
+        supabaseAdmin.from('agendamento').select('cliente_nome, cliente_telefone, data').order('data', { ascending: false })
+      ]);
+
+      const map = new Map();
+      (resCli.data || []).forEach(c => {
+        const tel = (c.telefone || '').replace(/\D/g, '');
+        if (tel && tel.length >= 8) {
+          map.set(tel, { nome: (c.nome || 'Cliente').trim(), telefone: tel, ultima_data: null });
+        }
+      });
+
+      (resAg.data || []).forEach(a => {
+        const tel = (a.cliente_telefone || '').replace(/\D/g, '');
+        if (tel && tel.length >= 8) {
+          const existing = map.get(tel) || { nome: (a.cliente_nome || 'Cliente').trim(), telefone: tel, ultima_data: null };
+          if (!existing.ultima_data || (a.data && a.data > existing.ultima_data)) {
+            existing.ultima_data = a.data;
+          }
+          map.set(tel, existing);
+        }
+      });
+
+      setClientesList(Array.from(map.values()));
+    } catch (e) {
+      console.error('Erro ao carregar clientes para marketing:', e);
+    } finally {
+      setLoadingClientes(false);
     }
   };
 
@@ -310,6 +364,9 @@ function AdminWhatsAppContent() {
       template_cancelamento: 'whatsapp_template_cancelamento',
       template_lembrete: 'whatsapp_template_lembrete',
       template_aviso_barbeiro: 'whatsapp_template_aviso_barbeiro',
+      template_marketing: 'whatsapp_template_marketing',
+      marketing_imagem_url: 'whatsapp_marketing_imagem_url',
+      marketing_incluir_imagem: 'whatsapp_marketing_incluir_imagem',
     };
 
     const dbKey = dbKeyMap[field] || field;
@@ -454,6 +511,231 @@ function AdminWhatsAppContent() {
     } finally {
       setSendingTest(false);
     }
+  };
+
+  const getFilteredClients = () => {
+    if (marketingSegment === 'teste') {
+      return [{
+        nome: 'Barbeiro Luan (Teste)',
+        telefone: settings.numero_teste_luan || LUAN_DEFAULT_PHONE,
+        ultima_data: 'Hoje'
+      }];
+    }
+
+    const now = new Date();
+    return clientesList.filter(cli => {
+      if (marketingSegment === 'todos') return true;
+      if (!cli.ultima_data) return true; // Clientes sem agendamento recente
+
+      const diffDays = Math.floor((now - new Date(cli.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+      if (marketingSegment === 'inativos_15') return diffDays >= 15;
+      if (marketingSegment === 'inativos_30') return diffDays >= 30;
+      return true;
+    });
+  };
+
+  const handleSendMarketingTest = async () => {
+    if (connectionState !== 'open') {
+      toast.warning('O WhatsApp precisa estar conectado para disparar o teste.');
+      return;
+    }
+    const targetNumber = settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
+    if (!targetNumber) {
+      toast.error('Número de teste do Luan não configurado.');
+      return;
+    }
+
+    setSendingTest(true);
+    try {
+      const sampleData = {
+        cliente_nome: 'Carlos Silva',
+        cliente_primeiro_nome: 'Carlos',
+        cliente_telefone: '(31) 98765-4321',
+        barbeiro_nome: 'Luan',
+        endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem',
+        telefone_barbearia: '(31) 97365-1924'
+      };
+
+      let formattedText = evolutionApi.formatTemplate(
+        settings.template_marketing,
+        sampleData,
+        settings.antiban_spintax_ativo
+      );
+      formattedText = `🧪 *[TESTE DE MARKETING INSTITUCIONAL]*\n\n${formattedText}`;
+
+      let mediaUrl = null;
+      if (settings.marketing_incluir_imagem) {
+        mediaUrl = settings.marketing_imagem_url || DEFAULT_LOGO_URL;
+      }
+
+      const res = await evolutionApi.sendHumanizedTextMessage(
+        targetNumber,
+        formattedText,
+        settings,
+        evolutionApi.getInstanceName(),
+        { mediaUrl, tipo: 'campanha_marketing', isImmediate: true }
+      );
+
+      if (res.success) {
+        toast.success(`Mensagem de marketing enviada com sucesso para ${targetNumber}!`);
+        confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+      } else {
+        toast.error('Erro ao enviar teste: ' + (res.error || res.reason || 'Falha no disparo'));
+      }
+    } catch (e) {
+      toast.error('Erro: ' + e.message);
+    } finally {
+      setSendingTest(false);
+    }
+  };
+
+  const handleStartMarketingCampaign = async () => {
+    if (connectionState !== 'open') {
+      toast.warning('O WhatsApp precisa estar conectado para iniciar a campanha.');
+      return;
+    }
+
+    const targets = getFilteredClients();
+    if (targets.length === 0) {
+      toast.error('Nenhum cliente elegível para este segmento selecionado.');
+      return;
+    }
+
+    const isTest = marketingSegment === 'teste' || settings.modo_operacao === 'teste';
+    const confirmPrompt = isTest
+      ? `Disparar teste de marketing para o WhatsApp do Barbeiro Luan (${settings.numero_teste_luan})?`
+      : `ATENÇÃO: Você iniciará o disparo da Campanha de Autoestima para ${targets.length} clientes reais com proteção Anti-Ban (intervalo seguro entre cada mensagem). Deseja continuar?`;
+
+    if (!window.confirm(confirmPrompt)) return;
+
+    campaignStopRef.current = false;
+    setCampaignRunning(true);
+    setCampaignProgress({
+      total: targets.length,
+      current: 0,
+      sent: 0,
+      failed: 0,
+      nextCountdown: 0,
+      currentContact: ''
+    });
+
+    for (let i = 0; i < targets.length; i++) {
+      if (campaignStopRef.current) {
+        toast.info('Campanha cancelada/pausada pelo usuário.');
+        break;
+      }
+
+      const client = targets[i];
+      setCampaignProgress(prev => ({
+        ...prev,
+        current: i + 1,
+        currentContact: `${client.nome} (${client.telefone})`
+      }));
+
+      const sampleData = {
+        cliente_nome: client.nome,
+        cliente_primeiro_nome: (client.nome || 'Cliente').split(' ')[0],
+        cliente_telefone: client.telefone,
+        barbeiro_nome: 'Luan',
+        endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem',
+        telefone_barbearia: '(31) 97365-1924'
+      };
+
+      let formattedText = evolutionApi.formatTemplate(
+        settings.template_marketing,
+        sampleData,
+        settings.antiban_spintax_ativo
+      );
+
+      if (isTest) {
+        formattedText = `🧪 *[TESTE DE MARKETING - Destinado a: ${client.nome}]*\n\n${formattedText}`;
+      }
+
+      let mediaUrl = null;
+      if (settings.marketing_incluir_imagem) {
+        mediaUrl = settings.marketing_imagem_url || DEFAULT_LOGO_URL;
+      }
+
+      const targetNumber = isTest ? (settings.numero_teste_luan || LUAN_DEFAULT_PHONE) : client.telefone;
+
+      try {
+        const res = await evolutionApi.sendHumanizedTextMessage(
+          targetNumber,
+          formattedText,
+          settings,
+          evolutionApi.getInstanceName(),
+          { mediaUrl, tipo: 'campanha_marketing', isImmediate: true }
+        );
+
+        if (res.success) {
+          setCampaignProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
+          setCampaignLogs(prev => [
+            {
+              id: Date.now() + Math.random(),
+              cliente: client.nome,
+              telefone: targetNumber,
+              hora: new Date().toLocaleTimeString('pt-BR'),
+              status: 'sucesso',
+              detalhe: 'Enviado com sucesso'
+            },
+            ...prev
+          ]);
+
+          try {
+            await supabaseAdmin.from('conversa_whatsapp').insert({
+              telefone_cliente: targetNumber,
+              role: 'assistant',
+              mensagem: formattedText,
+              dados_extraidos: {
+                tipo: 'campanha_marketing',
+                segmento: marketingSegment,
+                cliente_original: client.nome
+              }
+            });
+          } catch (eDb) {}
+        } else {
+          setCampaignProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
+          setCampaignLogs(prev => [
+            {
+              id: Date.now() + Math.random(),
+              cliente: client.nome,
+              telefone: targetNumber,
+              hora: new Date().toLocaleTimeString('pt-BR'),
+              status: 'erro',
+              detalhe: res.error || res.reason || 'Falha no envio'
+            },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        setCampaignProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
+      }
+
+      // Intervalo de segurança Anti-Ban
+      if (i < targets.length - 1 && !campaignStopRef.current) {
+        const delaySec = isTest ? 3 : Math.floor(Math.random() * 12) + 20; // 20s a 32s
+        for (let cd = delaySec; cd > 0; cd--) {
+          if (campaignStopRef.current) break;
+          setCampaignProgress(prev => ({ ...prev, nextCountdown: cd }));
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        setCampaignProgress(prev => ({ ...prev, nextCountdown: 0 }));
+      }
+    }
+
+    setCampaignRunning(false);
+    if (!campaignStopRef.current) {
+      toast.success('🎉 Campanha concluída com sucesso!');
+      try {
+        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+      } catch (e) {}
+    }
+  };
+
+  const handleStopCampaign = () => {
+    campaignStopRef.current = true;
+    setCampaignRunning(false);
+    toast.info('Campanha cancelada.');
   };
 
   // Preview dinâmico para renderizar balão do WhatsApp com Spintax resolvido
@@ -635,7 +917,7 @@ function AdminWhatsAppContent() {
 
         {/* Abas Principais do Hub WhatsApp */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-[#141414] border border-[#222] p-1.5 h-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 max-w-4xl gap-1">
+          <TabsList className="bg-[#141414] border border-[#222] p-1.5 h-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 max-w-5xl gap-1">
             <TabsTrigger
               value="conexao"
               className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
@@ -653,6 +935,12 @@ function AdminWhatsAppContent() {
               className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
             >
               <Clock className="w-4 h-4" /> Lembretes
+            </TabsTrigger>
+            <TabsTrigger
+              value="marketing"
+              className="py-2.5 text-xs data-[state=active]:bg-[#D4AF37] data-[state=active]:text-black font-semibold flex items-center justify-center gap-1.5"
+            >
+              <Megaphone className="w-4 h-4" /> Marketing & Campanhas
             </TabsTrigger>
             <TabsTrigger
               value="logo"
@@ -1302,6 +1590,435 @@ function AdminWhatsAppContent() {
                 {savingSettings ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                 Salvar Parâmetros de Disparo
               </Button>
+            </div>
+          </TabsContent>
+
+          {/* ==================== ABA: MARKETING & CAMPANHAS DE AUTOESTIMA ==================== */}
+          <TabsContent value="marketing" className="space-y-6 m-0">
+            {/* Cabeçalho do Módulo */}
+            <Card className="bg-[#141414] border-[#D4AF37]/40 shadow-xl">
+              <CardHeader className="pb-4 border-b border-[#222]">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center text-[#D4AF37]">
+                      <Megaphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg text-white flex items-center gap-2">
+                        <span>Campanhas de Marketing: Autoestima & Presença Masculina</span>
+                        <Badge className="bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40 text-[11px] font-bold">
+                          Com Imagem & Spintax
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription className="text-xs text-gray-400 mt-1">
+                        Envie mensagens de engajamento institucional com a imagem oficial da Barbearia DeMattos e proteção Anti-Ban integrada.
+                      </CardDescription>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSendMarketingTest}
+                      disabled={sendingTest || connectionState !== 'open'}
+                      className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 text-xs font-bold"
+                    >
+                      {sendingTest ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1.5" />}
+                      Testar no Celular do Luan
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* COLUNA ESQUERDA (7 colunas): Configurações, Imagem, Texto e Segmentação */}
+              <div className="lg:col-span-7 space-y-6">
+                
+                {/* 1. Imagem da Campanha */}
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader className="pb-3 border-b border-[#222]">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                        <ImageIcon className="w-4 h-4 text-[#D4AF37]" /> Imagem da Campanha
+                      </CardTitle>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400">Anexar imagem:</span>
+                        <Switch
+                          checked={settings.marketing_incluir_imagem}
+                          onCheckedChange={(val) => handleToggleOrUpdateSetting('marketing_incluir_imagem', val, val ? 'Envio com imagem ativado!' : 'Envio somente texto ativado!')}
+                        />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-3">
+                    <div className="flex items-center gap-4 p-3 bg-black/40 border border-[#2a2a2a] rounded-lg">
+                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-[#D4AF37]/40 shrink-0 bg-black flex items-center justify-center">
+                        <img
+                          src={settings.marketing_imagem_url || DEFAULT_LOGO_URL}
+                          alt="Logo Campanha"
+                          className="w-full h-full object-cover"
+                          onError={(e) => { e.target.src = DEFAULT_LOGO_URL; }}
+                        />
+                      </div>
+                      <div className="flex-1 space-y-1.5">
+                        <label className="text-xs font-medium text-gray-300 block">URL da Imagem / Logotipo:</label>
+                        <Input
+                          value={settings.marketing_imagem_url || ''}
+                          onChange={(e) => setSettings({ ...settings, marketing_imagem_url: e.target.value })}
+                          onBlur={(e) => handleToggleOrUpdateSetting('marketing_imagem_url', e.target.value, 'URL da imagem salva no banco!')}
+                          placeholder={DEFAULT_LOGO_URL}
+                          className="bg-[#18181b] border-[#444] text-white text-xs h-8"
+                          style={{ color: '#FFFFFF', backgroundColor: '#18181b', colorScheme: 'dark' }}
+                        />
+                        <p className="text-[10px] text-gray-400">
+                          Padrão: Logotipo oficial de alta qualidade da Barbearia DeMattos.
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* 2. Texto da Campanha */}
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader className="pb-3 border-b border-[#222]">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-[#25D366]" /> Mensagem da Campanha (Autoestima & Aparência)
+                        </CardTitle>
+                        <CardDescription className="text-xs text-gray-400 mt-0.5">
+                          Texto persuasivo com variações Spintax para evitar bloqueios da Meta.
+                        </CardDescription>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (window.confirm('Restaurar o texto oficial de marketing e autoestima?')) {
+                            setSettings(prev => ({ ...prev, template_marketing: DEFAULT_TEMPLATES.marketing }));
+                            handleToggleOrUpdateSetting('template_marketing', DEFAULT_TEMPLATES.marketing, 'Texto oficial restaurado e salvo!');
+                          }
+                        }}
+                        className="text-xs text-[#D4AF37] hover:text-[#e5c04b] h-7 px-2"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restaurar Oficial
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-3">
+                    {/* Tags Rápidas */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] text-gray-400 font-semibold mr-1">Inserir:</span>
+                      {[
+                        { label: 'Saudação Período', tag: '{{saudacao_periodo}}' },
+                        { label: '1º Nome Cliente', tag: '{{cliente_primeiro_nome}}' },
+                        { label: 'Nome Completo', tag: '{{cliente_nome}}' },
+                        { label: 'Link do Site', tag: 'https://demattos.lynxems.com.br' },
+                        { label: 'Telefone Barbearia', tag: '{{telefone_barbearia}}' }
+                      ].map((item) => (
+                        <button
+                          key={item.tag}
+                          type="button"
+                          onClick={() => {
+                            setSettings(prev => ({
+                              ...prev,
+                              template_marketing: (prev.template_marketing || '') + ` ${item.tag} `
+                            }));
+                          }}
+                          className="text-[10px] bg-[#1a1a1a] hover:bg-[#252525] text-amber-300 px-2 py-0.5 rounded border border-[#333] font-mono transition-colors"
+                        >
+                          + {item.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <Textarea
+                      rows={12}
+                      value={settings.template_marketing}
+                      onChange={(e) => setSettings({ ...settings, template_marketing: e.target.value })}
+                      onBlur={(e) => handleToggleOrUpdateSetting('template_marketing', e.target.value, 'Texto da campanha salvo no banco!')}
+                      placeholder="Digite o texto da mensagem de marketing..."
+                      className="bg-[#0b141a] border-2 border-[#333] focus:border-[#25D366] text-white font-sans text-xs leading-relaxed p-3.5 rounded-lg shadow-inner resize-y"
+                      style={{ color: '#FFFFFF', backgroundColor: '#0b141a', colorScheme: 'dark' }}
+                    />
+
+                    <div className="flex items-center justify-between text-xs text-gray-400 pt-1">
+                      <span>Variações Spintax <code>&#123;opção 1|opção 2&#125;</code> são alternadas a cada cliente.</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => handleToggleOrUpdateSetting('template_marketing', settings.template_marketing, 'Texto salvo no banco de dados!')}
+                        className="h-7 text-xs bg-[#D4AF37] hover:bg-[#b89730] text-black font-bold"
+                      >
+                        <Save className="w-3 h-3 mr-1" /> Salvar Texto
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* 3. Segmentação de Clientes */}
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader className="pb-3 border-b border-[#222]">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                        <Users className="w-4 h-4 text-blue-400" /> Segmentação do Público-Alvo
+                      </CardTitle>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadClientesForMarketing}
+                        disabled={loadingClientes}
+                        className="text-xs text-gray-400 hover:text-white h-7"
+                      >
+                        <RotateCw className={`w-3 h-3 mr-1 ${loadingClientes ? 'animate-spin' : ''}`} /> Atualizar Base
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMarketingSegment('inativos_15')}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          marketingSegment === 'inativos_15'
+                            ? 'bg-[#1a231d] border-[#25D366] text-white shadow-md'
+                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">Inativos 15+ dias</p>
+                        <p className="text-[11px] text-[#25D366] font-mono mt-0.5">
+                          {clientesList.filter(c => {
+                            if (!c.ultima_data) return true;
+                            const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+                            return d >= 15;
+                          }).length} clientes
+                        </p>
+                        <span className="text-[10px] text-gray-400 block mt-1">Hora de cortar de novo</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMarketingSegment('inativos_30')}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          marketingSegment === 'inativos_30'
+                            ? 'bg-[#251f15] border-amber-500 text-white shadow-md'
+                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">Inativos 30+ dias</p>
+                        <p className="text-[11px] text-amber-400 font-mono mt-0.5">
+                          {clientesList.filter(c => {
+                            if (!c.ultima_data) return true;
+                            const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
+                            return d >= 30;
+                          }).length} clientes
+                        </p>
+                        <span className="text-[10px] text-gray-400 block mt-1">Reconquista / Sumidos</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMarketingSegment('todos')}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          marketingSegment === 'todos'
+                            ? 'bg-[#17212e] border-blue-500 text-white shadow-md'
+                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">Toda a Base</p>
+                        <p className="text-[11px] text-blue-400 font-mono mt-0.5">
+                          {clientesList.length} clientes
+                        </p>
+                        <span className="text-[10px] text-gray-400 block mt-1">Todos cadastrados</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMarketingSegment('teste')}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          marketingSegment === 'teste'
+                            ? 'bg-[#291b29] border-purple-500 text-white shadow-md'
+                            : 'bg-[#18181b] border-[#333] text-gray-300 hover:bg-[#202024]'
+                        }`}
+                      >
+                        <p className="text-xs font-bold">Somente Teste</p>
+                        <p className="text-[11px] text-purple-400 font-mono mt-0.5">
+                          1 contato
+                        </p>
+                        <span className="text-[10px] text-gray-400 block mt-1">Celular do Luan</span>
+                      </button>
+                    </div>
+
+                    <div className="p-2.5 bg-black/40 border border-[#2a2a2a] rounded-lg flex items-center justify-between text-xs">
+                      <span className="text-gray-300">
+                        Total selecionado para esta campanha: <strong className="text-white font-mono text-sm">{getFilteredClients().length} contatos</strong>
+                      </span>
+                      <span className="text-[11px] text-gray-400">
+                        {marketingSegment === 'teste' ? 'Disparo isolado de homologação' : 'Disparo sequencial com fila anti-ban'}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* COLUNA DIREITA (5 colunas): Prévia ao Vivo & Painel de Disparo */}
+              <div className="lg:col-span-5 space-y-6">
+
+                {/* Prévia ao Vivo no WhatsApp */}
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader className="pb-3 border-b border-[#222]">
+                    <CardTitle className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-[#D4AF37]" /> Prévia da Mensagem (Como o Cliente Recebe)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    <div className="bg-[#0b141a] border border-[#25D366]/30 rounded-xl p-3.5 shadow-xl space-y-3">
+                      {settings.marketing_incluir_imagem && (
+                        <div className="rounded-lg overflow-hidden border border-[#333] bg-black">
+                          <img
+                            src={settings.marketing_imagem_url || DEFAULT_LOGO_URL}
+                            alt="Logo Barbearia"
+                            className="w-full h-44 object-cover"
+                            onError={(e) => { e.target.src = DEFAULT_LOGO_URL; }}
+                          />
+                        </div>
+                      )}
+                      <div className="bg-[#111b21] p-3 rounded-lg border border-[#222] text-xs text-gray-200 whitespace-pre-wrap leading-relaxed font-sans shadow-inner">
+                        {evolutionApi.formatTemplate(
+                          settings.template_marketing,
+                          {
+                            cliente_nome: 'Carlos Silva',
+                            cliente_primeiro_nome: 'Carlos',
+                            cliente_telefone: '(31) 98765-4321',
+                            barbeiro_nome: 'Luan',
+                            endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem',
+                            telefone_barbearia: '(31) 97365-1924'
+                          },
+                          true
+                        )}
+                      </div>
+                      <div className="flex items-center justify-end gap-1 text-[10px] text-gray-400">
+                        <span>Agora</span>
+                        <CheckCheck className="w-3.5 h-3.5 text-[#25D366]" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Central de Disparo & Fila Segura Anti-Ban */}
+                <Card className="bg-[#141414] border-[#222]">
+                  <CardHeader className="pb-3 border-b border-[#222]">
+                    <CardTitle className="text-sm font-semibold text-white flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-[#25D366]" /> Central de Disparo Seguro
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-4">
+                    {/* Alerta de Proteção */}
+                    <div className="p-3 bg-[#121c15] border border-[#25D366]/30 rounded-lg text-xs space-y-1">
+                      <div className="flex items-center gap-2 text-[#25D366] font-bold">
+                        <ShieldCheck className="w-4 h-4" /> Proteções Ativas da Meta
+                      </div>
+                      <p className="text-gray-300 text-[11px] leading-relaxed">
+                        Envio sequencial com atraso randômico de 20s a 35s entre mensagens, simulação de digitação e Spintax textual para segurança total do seu número.
+                      </p>
+                    </div>
+
+                    {/* Barra de Progresso quando Campanha está Rodando */}
+                    {campaignRunning && (
+                      <div className="p-4 bg-[#1a1a1a] border border-[#333] rounded-xl space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-white flex items-center gap-2">
+                            <RotateCw className="w-3.5 h-3.5 animate-spin text-[#25D366]" />
+                            Enviando: {campaignProgress.current} de {campaignProgress.total}
+                          </span>
+                          <span className="font-mono text-[#25D366] font-bold">
+                            {Math.round((campaignProgress.sent / (campaignProgress.total || 1)) * 100)}%
+                          </span>
+                        </div>
+
+                        <div className="w-full bg-[#2a2a2a] rounded-full h-2.5 overflow-hidden">
+                          <div
+                            className="bg-[#25D366] h-full transition-all duration-300"
+                            style={{ width: `${Math.round((campaignProgress.current / (campaignProgress.total || 1)) * 100)}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-gray-400">
+                          <span>Destino: <strong className="text-white">{campaignProgress.currentContact}</strong></span>
+                          {campaignProgress.nextCountdown > 0 && (
+                            <span className="text-amber-400 font-mono font-bold animate-pulse">
+                              Próximo em {campaignProgress.nextCountdown}s...
+                            </span>
+                          )}
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={handleStopCampaign}
+                          className="w-full h-8 text-xs font-bold"
+                        >
+                          <Square className="w-3.5 h-3.5 mr-1.5" /> Interromper Fila da Campanha
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Botões de Ação quando Não está rodando */}
+                    {!campaignRunning && (
+                      <div className="space-y-2">
+                        <Button
+                          type="button"
+                          onClick={handleStartMarketingCampaign}
+                          disabled={connectionState !== 'open'}
+                          className="w-full h-11 bg-[#25D366] hover:bg-[#20ba5a] text-black font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#25D366]/20"
+                        >
+                          <Play className="w-4 h-4 fill-black" />
+                          <span>Iniciar Disparo ({getFilteredClients().length} contatos)</span>
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleSendMarketingTest}
+                          disabled={sendingTest || connectionState !== 'open'}
+                          className="w-full h-9 border-[#333] text-gray-300 hover:text-white hover:bg-[#1a1a1a] text-xs"
+                        >
+                          {sendingTest ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-2 text-amber-400" />}
+                          Disparar Teste de Homologação no WhatsApp do Luan
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Log de Envios Recentes da Sessão */}
+                    {campaignLogs.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-[#222]">
+                        <span className="text-[11px] text-gray-400 font-semibold block">Relatório dos Últimos Disparos:</span>
+                        <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                          {campaignLogs.map(log => (
+                            <div
+                              key={log.id}
+                              className="p-2 rounded bg-black/50 border border-[#222] flex items-center justify-between text-[11px]"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${log.status === 'sucesso' ? 'bg-[#25D366]' : 'bg-red-500'}`} />
+                                <span className="text-white font-medium">{log.cliente}</span>
+                                <span className="text-gray-400 font-mono">({log.telefone})</span>
+                              </div>
+                              <span className="text-gray-400 font-mono text-[10px]">{log.hora}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </TabsContent>
 
