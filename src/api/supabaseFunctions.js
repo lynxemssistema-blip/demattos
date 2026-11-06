@@ -354,7 +354,8 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         if (agErr || !ag) return { data: { error: 'Agendamento não encontrado.' } };
 
         const tipo = params.tipo || 'confirmacao';
-        const res = await evolutionApi.sendAppointmentNotification(tipo, ag);
+        const customMessage = params.mensagemCustomizada || params.mensagem || null;
+        const res = await evolutionApi.sendAppointmentNotification(tipo, ag, { customMessage });
         return { data: { success: !!res?.success, res } };
       }
 

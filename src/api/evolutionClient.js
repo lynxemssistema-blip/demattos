@@ -423,6 +423,14 @@ export const evolutionApi = {
     const primeiroNome = (data.cliente_nome || 'Cliente').trim().split(' ')[0];
     const saudacao = getSaudacaoPeriodo();
 
+    let dataFormatada = data.data || '';
+    if (dataFormatada && dataFormatada.includes('-')) {
+      const parts = dataFormatada.split('-');
+      if (parts.length === 3) {
+        dataFormatada = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
+
     let text = template
       .replace(/\{\{\s*saudacao_periodo\s*\}\}/gi, saudacao)
       .replace(/\{\{\s*cliente_primeiro_nome\s*\}\}/gi, primeiroNome)
@@ -430,7 +438,7 @@ export const evolutionApi = {
       .replace(/\{\{\s*cliente_telefone\s*\}\}/gi, data.cliente_telefone || data.phone || '')
       .replace(/\{\{\s*barbeiro_nome\s*\}\}/gi, data.barbeiro_nome || data.profissional_nome || 'Luan')
       .replace(/\{\{\s*servico\s*\}\}/gi, data.servico || 'Corte e Barba')
-      .replace(/\{\{\s*data\s*\}\}/gi, data.data || '')
+      .replace(/\{\{\s*data\s*\}\}/gi, dataFormatada)
       .replace(/\{\{\s*horario\s*\}\}/gi, data.horario || '')
       .replace(/\{\{\s*endereco\s*\}\}/gi, data.endereco || 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem')
       .replace(/\{\{\s*telefone_barbearia\s*\}\}/gi, data.telefone_barbearia || '(31) 97365-1924')
@@ -610,27 +618,38 @@ export const evolutionApi = {
   },
 
   /**
-   * Dispara notificação automática de agendamento respeitando modo oficial vs teste e Anti-Ban
-   * @param {'confirmacao'|'cancelamento'|'lembrete'} tipo
+   * Dispara notificação de agendamento respeitando modo oficial vs teste e Anti-Ban
+   * @param {'confirmacao'|'cancelamento'|'lembrete'|'aviso_barbeiro'|'personalizada'} tipo
    * @param {Object} agendamentoData
+   * @param {Object} [options]
    */
-  async sendAppointmentNotification(tipo, agendamentoData) {
+  async sendAppointmentNotification(tipo, agendamentoData, options = {}) {
     try {
       const settings = await this.getWhatsAppSettings();
 
-      // Verificar se o tipo está ativado
-      if (tipo === 'confirmacao' && !settings.confirmacao_ativa) return { skipped: true, reason: 'Desativado' };
-      if (tipo === 'cancelamento' && !settings.cancelamento_ativo) return { skipped: true, reason: 'Desativado' };
-      if (tipo === 'lembrete' && !settings.lembrete_ativo) return { skipped: true, reason: 'Desativado' };
+      // Se for mensagem customizada direta (acionada pelo admin), não barra por switch inativo
+      if (!options.customMessage) {
+        if (tipo === 'confirmacao' && !settings.confirmacao_ativa) return { skipped: true, reason: 'Desativado' };
+        if (tipo === 'cancelamento' && !settings.cancelamento_ativo) return { skipped: true, reason: 'Desativado' };
+        if (tipo === 'lembrete' && !settings.lembrete_ativo) return { skipped: true, reason: 'Desativado' };
+        if (tipo === 'aviso_barbeiro' && !settings.notificar_barbeiro_ativo) return { skipped: true, reason: 'Desativado' };
+      }
 
       // Obter template correto
       let template = settings.template_confirmacao;
       if (tipo === 'cancelamento') template = settings.template_cancelamento;
       if (tipo === 'lembrete') template = settings.template_lembrete;
+      if (tipo === 'aviso_barbeiro') template = settings.template_aviso_barbeiro;
 
-      let formattedText = this.formatTemplate(template, agendamentoData, settings.antiban_spintax_ativo);
+      let formattedText = options.customMessage
+        ? options.customMessage
+        : this.formatTemplate(template, agendamentoData, settings.antiban_spintax_ativo);
 
-      let targetNumber = agendamentoData.cliente_telefone;
+      let targetNumber = options.targetPhone || agendamentoData.cliente_telefone;
+
+      if (tipo === 'aviso_barbeiro' && !options.targetPhone) {
+        targetNumber = agendamentoData.profissional_telefone || settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
+      }
 
       // REGRA DE TESTE VS OFICIAL
       if (settings.modo_operacao === 'teste') {
@@ -648,6 +667,7 @@ export const evolutionApi = {
         if (tipo === 'confirmacao' && settings.whatsapp_logo_em_confirmacao) mediaUrl = logo;
         if (tipo === 'lembrete' && settings.whatsapp_logo_em_lembrete) mediaUrl = logo;
         if (tipo === 'cancelamento' && settings.whatsapp_logo_em_cancelamento) mediaUrl = logo;
+        if (tipo === 'aviso_barbeiro' && settings.whatsapp_logo_em_aviso_barbeiro) mediaUrl = logo;
       }
 
       // Envio humanizado (digitando + jitter + janela de horário + logo/mídia se ativa)

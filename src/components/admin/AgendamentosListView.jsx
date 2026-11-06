@@ -2,11 +2,36 @@ import React, { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { base44 } from '@/api/base44Client';
+import { evolutionApi, DEFAULT_TEMPLATES } from '@/api/evolutionClient';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { User, Phone, Calendar, Clock, Trash2, Zap, MessageSquare, Send, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import {
+  User,
+  Phone,
+  Calendar,
+  Clock,
+  Trash2,
+  Zap,
+  MessageSquare,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Check,
+  RotateCcw,
+  Sparkles
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -28,31 +53,105 @@ export default function AgendamentosListView({
   onOpenDailyAgenda
 }) {
   const queryClient = useQueryClient();
-  const [sendingWhatsappId, setSendingWhatsappId] = useState(null);
   const [expandedWhatsapp, setExpandedWhatsapp] = useState({});
+
+  // Estados do Modal de Disparo com Opções e Edição de Texto
+  const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
+  const [selectedAgendamento, setSelectedAgendamento] = useState(null);
+  const [selectedTipo, setSelectedTipo] = useState('confirmacao');
+  const [editableMessage, setEditableMessage] = useState('');
+  const [cachedSettings, setCachedSettings] = useState(null);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
 
   const toggleWhatsapp = (id) => {
     setExpandedWhatsapp(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleDispararWhatsApp = async (agendamento) => {
-    setSendingWhatsappId(agendamento.id);
+  const buildMessageText = (tipo, ag, settings) => {
+    if (!ag) return '';
+    const prof = profissionaisMap[ag.profissional_id];
+    const dataForTemplate = {
+      ...ag,
+      barbeiro_nome: prof?.nome || ag.profissional_nome || 'Luan',
+      profissional_telefone: prof?.telefone || '',
+      codigo_unico: ag.codigo_unico || (`#${ag.numero_agendamento || ''}`),
+    };
+
+    if (tipo === 'personalizada') {
+      const primeiroNome = (ag.cliente_nome || 'Cliente').split(' ')[0];
+      return `Olá, ${primeiroNome}! Passando para falar sobre o seu agendamento na Barbearia DeMattos. `;
+    }
+
+    let template = settings?.template_confirmacao || DEFAULT_TEMPLATES.confirmacao;
+    if (tipo === 'cancelamento') template = settings?.template_cancelamento || DEFAULT_TEMPLATES.cancelamento;
+    if (tipo === 'lembrete') template = settings?.template_lembrete || DEFAULT_TEMPLATES.lembrete;
+    if (tipo === 'aviso_barbeiro') template = settings?.template_aviso_barbeiro || DEFAULT_TEMPLATES.aviso_barbeiro;
+
+    return evolutionApi.formatTemplate(template, dataForTemplate, settings?.antiban_spintax_ativo ?? true);
+  };
+
+  const handleOpenWhatsappModal = async (agendamento) => {
+    setSelectedAgendamento(agendamento);
+    setSelectedTipo('confirmacao');
+    setWhatsappModalOpen(true);
+
+    try {
+      let settings = cachedSettings;
+      if (!settings) {
+        settings = await evolutionApi.getWhatsAppSettings();
+        setCachedSettings(settings);
+      }
+      const initialText = buildMessageText('confirmacao', agendamento, settings);
+      setEditableMessage(initialText);
+    } catch (e) {
+      console.error('Erro ao preparar mensagem:', e);
+      const initialText = buildMessageText('confirmacao', agendamento, null);
+      setEditableMessage(initialText);
+    }
+  };
+
+  const handleSelectTipo = (tipo) => {
+    setSelectedTipo(tipo);
+    if (!selectedAgendamento) return;
+    const newText = buildMessageText(tipo, selectedAgendamento, cachedSettings);
+    setEditableMessage(newText);
+  };
+
+  const handleRestoreTemplate = () => {
+    if (!selectedAgendamento) return;
+    const restoredText = buildMessageText(selectedTipo, selectedAgendamento, cachedSettings);
+    setEditableMessage(restoredText);
+    toast.info('Texto restaurado para o modelo padrão.');
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedAgendamento) return;
+    if (!editableMessage.trim()) {
+      toast.error('O texto da mensagem não pode estar vazio.');
+      return;
+    }
+
+    setIsSendingMessage(true);
     try {
       const res = await base44.functions.invoke('enviarWhatsAppAgendamento', {
-        agendamentoId: agendamento.id,
-        id: agendamento.id
+        agendamentoId: selectedAgendamento.id,
+        id: selectedAgendamento.id,
+        tipo: selectedTipo,
+        mensagemCustomizada: editableMessage.trim()
       });
+
       if (res.data?.success) {
-        toast.success(`Mensagem WhatsApp disparada com sucesso para ${agendamento.cliente_telefone}!`);
+        toast.success(`Mensagem disparada com sucesso para ${selectedAgendamento.cliente_telefone}!`);
         queryClient.invalidateQueries(['agendamentos']);
-        setExpandedWhatsapp(prev => ({ ...prev, [agendamento.id]: true }));
+        setWhatsappModalOpen(false);
+        setExpandedWhatsapp(prev => ({ ...prev, [selectedAgendamento.id]: true }));
       } else {
-        toast.error('Erro ao disparar WhatsApp: ' + (res.data?.error || 'Falha no envio'));
+        toast.error('Erro no envio: ' + (res.data?.error || res.data?.res?.reason || 'Falha no disparo'));
       }
     } catch (e) {
-      toast.error('Erro ao enviar WhatsApp: ' + e.message);
+      toast.error('Erro ao enviar: ' + e.message);
     } finally {
-      setSendingWhatsappId(null);
+      setIsSendingMessage(false);
     }
   };
 
@@ -248,16 +347,11 @@ export default function AgendamentosListView({
                           type="button"
                           size="sm"
                           variant="outline"
-                          onClick={() => handleDispararWhatsApp(agendamento)}
-                          disabled={sendingWhatsappId === agendamento.id}
+                          onClick={() => handleOpenWhatsappModal(agendamento)}
                           className="h-7 text-xs border-[#25D366]/40 text-[#25D366] hover:bg-[#25D366]/10 px-2.5 py-0 flex items-center gap-1.5"
-                          title="Disparar confirmação WhatsApp para este agendamento"
+                          title="Escolher modelo e disparar WhatsApp para este agendamento"
                         >
-                          {sendingWhatsappId === agendamento.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Send className="w-3 h-3" />
-                          )}
+                          <Send className="w-3 h-3" />
                           <span>{agendamento.mensagens_whatsapp?.length > 0 ? 'Reenviar WhatsApp' : 'Disparar WhatsApp'}</span>
                         </Button>
                       </div>
@@ -344,6 +438,180 @@ export default function AgendamentosListView({
         );
         })}
       </div>
+
+      {/* MODAL DE DISPARO WHATSAPP COM SELEÇÃO DE MODELOS E EDIÇÃO LIVRE */}
+      <Dialog open={whatsappModalOpen} onOpenChange={setWhatsappModalOpen}>
+        <DialogContent className="bg-[#121214] border border-[#2a2a2e] text-white max-w-2xl w-[95vw] p-5 sm:p-6 shadow-2xl rounded-xl">
+          <DialogHeader className="pb-3 border-b border-[#222]">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-[#25D366]/20 border border-[#25D366]/40 flex items-center justify-center text-[#25D366]">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div>
+                  <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>Disparar Mensagem via WhatsApp</span>
+                    <Badge className="bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/50 font-mono text-xs">
+                      {selectedAgendamento?.codigo_unico || (`#${selectedAgendamento?.numero_agendamento || ''}`)}
+                    </Badge>
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-gray-400 mt-0.5">
+                    Cliente: <strong className="text-gray-200">{selectedAgendamento?.cliente_nome}</strong> &bull; Telefone: <strong className="text-gray-200">{selectedAgendamento?.cliente_telefone}</strong>
+                  </DialogDescription>
+                </div>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* 1. SELEÇÃO DE QUAL MENSAGEM ENVIAR */}
+            <div>
+              <label className="text-xs font-semibold text-gray-300 block mb-2">
+                Escolha qual mensagem será enviada:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleSelectTipo('confirmacao')}
+                  className={`text-xs font-bold transition-all h-9 flex items-center justify-center gap-1.5 ${
+                    selectedTipo === 'confirmacao'
+                      ? 'bg-[#25D366] hover:bg-[#20ba5a] text-black shadow-md border-transparent'
+                      : 'bg-[#1a1a1e] border border-[#333] text-gray-300 hover:text-white hover:bg-[#222]'
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>1. Confirmação</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleSelectTipo('cancelamento')}
+                  className={`text-xs font-bold transition-all h-9 flex items-center justify-center gap-1.5 ${
+                    selectedTipo === 'cancelamento'
+                      ? 'bg-red-500 hover:bg-red-600 text-white shadow-md border-transparent'
+                      : 'bg-[#1a1a1e] border border-[#333] text-gray-300 hover:text-white hover:bg-[#222]'
+                  }`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>2. Cancelamento</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleSelectTipo('lembrete')}
+                  className={`text-xs font-bold transition-all h-9 flex items-center justify-center gap-1.5 ${
+                    selectedTipo === 'lembrete'
+                      ? 'bg-amber-500 hover:bg-amber-600 text-black shadow-md border-transparent'
+                      : 'bg-[#1a1a1e] border border-[#333] text-gray-300 hover:text-white hover:bg-[#222]'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>3. Lembrete</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleSelectTipo('personalizada')}
+                  className={`text-xs font-bold transition-all h-9 flex items-center justify-center gap-1.5 ${
+                    selectedTipo === 'personalizada'
+                      ? 'bg-[#D4AF37] hover:bg-[#B8973D] text-black shadow-md border-transparent'
+                      : 'bg-[#1a1a1e] border border-[#333] text-gray-300 hover:text-white hover:bg-[#222]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>4. Personalizada</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* 2. ÁREA DE EDIÇÃO DO TEXTO */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-gray-200 flex items-center gap-1">
+                  <span>Texto da Mensagem (Editável antes de enviar):</span>
+                </label>
+                {selectedTipo !== 'personalizada' && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreTemplate}
+                    className="text-[11px] text-[#D4AF37] hover:underline flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Restaurar Modelo</span>
+                  </button>
+                )}
+              </div>
+
+              <Textarea
+                rows={9}
+                value={editableMessage}
+                onChange={(e) => setEditableMessage(e.target.value)}
+                placeholder="Digite a mensagem para o cliente..."
+                className="bg-[#0b141a] border-2 border-[#25D366]/40 text-white font-sans text-xs sm:text-sm leading-relaxed p-3.5 focus:border-[#25D366] focus:ring-1 focus:ring-[#25D366] rounded-lg shadow-inner resize-y"
+                style={{ color: '#FFFFFF', backgroundColor: '#0b141a', colorScheme: 'dark' }}
+              />
+              <p className="text-[11px] text-gray-400">
+                Você pode editar e personalizar o texto acima antes de disparar para o WhatsApp.
+              </p>
+            </div>
+
+            {/* 3. AVISO DE MODO */}
+            <div className="p-2.5 rounded-lg bg-[#18181b] border border-[#333] flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                {cachedSettings?.modo_operacao === 'oficial' ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-[#25D366]"></span>
+                    <span className="text-gray-300">
+                      Disparo em <strong className="text-[#25D366]">Modo Oficial</strong> para: <strong className="text-white">{selectedAgendamento?.cliente_telefone}</strong>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                    <span className="text-gray-300">
+                      Disparo em <strong className="text-amber-400">Modo de Teste</strong> para Barbeiro Luan: <strong className="text-white">{cachedSettings?.numero_teste_luan || '5531973651924'}</strong>
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t border-[#222] pt-3 flex flex-row items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setWhatsappModalOpen(false)}
+              disabled={isSendingMessage}
+              className="border-[#333] text-gray-400 hover:bg-[#1a1a1a] hover:text-white text-xs h-9 px-4"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSendMessage}
+              disabled={isSendingMessage}
+              className="bg-[#25D366] hover:bg-[#20ba5a] text-black font-bold text-xs h-9 px-5 flex items-center gap-1.5 shadow-md"
+            >
+              {isSendingMessage ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Disparando...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Enviar WhatsApp Agora</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }
