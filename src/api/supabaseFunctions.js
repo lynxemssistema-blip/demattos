@@ -970,9 +970,17 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
       case 'cancelarMeuAgendamento':
       case 'cancelarAgendamento': {
-        const { id, agendamento_id } = params;
-        const targetId = id || agendamento_id;
-        const { data, error } = await supabase.from('agendamento').update({ status: 'cancelado' }).eq('id', targetId).select().single();
+        const targetId = params?.id || params?.agendamento_id || params?.agendamentoId;
+        if (!targetId) {
+          return { data: { error: 'ID do agendamento não informado.' } };
+        }
+        const { data, error } = await supabaseAdmin
+          .from('agendamento')
+          .update({ status: 'cancelado' })
+          .eq('id', targetId)
+          .select()
+          .maybeSingle();
+
         if (error) throw error;
 
         // Disparo de notificação de cancelamento WhatsApp para o cliente

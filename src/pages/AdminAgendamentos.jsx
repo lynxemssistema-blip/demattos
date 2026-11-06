@@ -107,7 +107,9 @@ function AdminAgendamentosContent() {
   const deleteAgendamentoMutation = useMutation({
     mutationFn: async (id) => {
       const response = await base44.functions.invoke('cancelarAgendamento', {
-        agendamentoId: id
+        agendamentoId: id,
+        id: id,
+        agendamento_id: id
       });
       if (response?.data?.error) {
         throw new Error(response.data.error);

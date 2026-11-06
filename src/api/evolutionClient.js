@@ -339,16 +339,25 @@ export const evolutionApi = {
       const settings = settingsOverride || await this.getWhatsAppSettings();
 
       // 1. Verificação da Janela de Silêncio Noturno (Anti-Denúncia)
-      if (settings.antiban_janela_ativa) {
+      // Mensagens transacionais imediatas (confirmação que o cliente acabou de fazer, cancelamento, aviso ao barbeiro)
+      // NUNCA devem ser bloqueadas, pois o usuário acabou de interagir e aguarda o retorno imediato.
+      const isTransactionalImmediate = options.isImmediate || 
+                                       options.tipo === 'confirmacao' || 
+                                       options.tipo === 'aviso_barbeiro_novo' || 
+                                       options.tipo === 'cancelamento' || 
+                                       options.tipo === 'aviso_barbeiro_cancelamento' ||
+                                       options.bypassWindow;
+
+      if (settings.antiban_janela_ativa && !isTransactionalImmediate) {
         const now = new Date();
         const currentHours = now.getHours();
         const currentMinutes = now.getMinutes();
         const currentTotalMin = currentHours * 60 + currentMinutes;
 
         const [iniH, iniM] = (settings.antiban_janela_inicio || '08:00').split(':').map(Number);
-        const [fimH, fimM] = (settings.antiban_janela_fim || '21:30').split(':').map(Number);
+        const [fimH, fimM] = (settings.antiban_janela_fim || '23:59').split(':').map(Number);
         const inicioTotalMin = (iniH || 8) * 60 + (iniM || 0);
-        const fimTotalMin = (fimH || 21) * 60 + (fimM || 30);
+        const fimTotalMin = (fimH || 23) * 60 + (fimM || 59);
 
         if (currentTotalMin < inicioTotalMin || currentTotalMin > fimTotalMin) {
           console.warn(`[Anti-Ban] Envio cancelado fora da janela permitida (${settings.antiban_janela_inicio} às ${settings.antiban_janela_fim}). Hora atual: ${now.toLocaleTimeString()}`);
@@ -640,7 +649,13 @@ export const evolutionApi = {
       }
 
       // Envio humanizado (digitando + jitter + janela de horário + logo/mídia se ativa)
-      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
+      const res = await this.sendHumanizedTextMessage(
+        targetNumber,
+        formattedText,
+        settings,
+        this.getInstanceName(),
+        { mediaUrl, tipo, isImmediate: true }
+      );
 
       // Registrar histórico em conversa_whatsapp se possível
       try {
@@ -696,7 +711,13 @@ export const evolutionApi = {
         mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
       }
 
-      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
+      const res = await this.sendHumanizedTextMessage(
+        targetNumber,
+        formattedText,
+        settings,
+        this.getInstanceName(),
+        { mediaUrl, tipo: 'aviso_barbeiro_novo', isImmediate: true }
+      );
 
       try {
         await supabaseAdmin.from('conversa_whatsapp').insert({
@@ -748,7 +769,13 @@ export const evolutionApi = {
         mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
       }
 
-      const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
+      const res = await this.sendHumanizedTextMessage(
+        targetNumber,
+        formattedText,
+        settings,
+        this.getInstanceName(),
+        { mediaUrl, tipo: 'aviso_barbeiro_cancelamento', isImmediate: true }
+      );
 
       try {
         await supabaseAdmin.from('conversa_whatsapp').insert({
