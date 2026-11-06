@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 
 const DEFAULT_API_URL = import.meta.env.VITE_EVOLUTION_API_URL || 'https://evo.lynxems.com.br';
 const DEFAULT_API_KEY = import.meta.env.VITE_EVOLUTION_API_KEY || 'F10230BCFE78-4B5A-80F3-789AD4E58B79';
@@ -526,6 +526,29 @@ export const evolutionApi = {
   },
 
   /**
+   * Atualiza uma chave única no banco de dados Supabase imediatamente
+   */
+  async updateSingleSetting(chave, valor, descricao = '') {
+    try {
+      const valStr = typeof valor === 'boolean' ? String(valor) : String(valor ?? '');
+      const { error } = await supabaseAdmin
+        .from('configuracao')
+        .upsert(
+          { chave, valor: valStr, descricao: descricao || chave },
+          { onConflict: 'chave' }
+        );
+      if (error) {
+        console.error(`Erro ao salvar chave ${chave}:`, error);
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (e) {
+      console.error(`Erro ao salvar chave ${chave}:`, e);
+      return { success: false, error: e.message };
+    }
+  },
+
+  /**
    * Salva configurações e modelos no Supabase
    */
   async saveWhatsAppSettings(settings) {
@@ -563,7 +586,7 @@ export const evolutionApi = {
       ];
 
       for (const item of items) {
-        await supabase
+        await supabaseAdmin
           .from('configuracao')
           .upsert(item, { onConflict: 'chave' });
       }
@@ -621,7 +644,7 @@ export const evolutionApi = {
 
       // Registrar histórico em conversa_whatsapp se possível
       try {
-        await supabase.from('conversa_whatsapp').insert({
+        await supabaseAdmin.from('conversa_whatsapp').insert({
           telefone_cliente: targetNumber,
           role: 'assistant',
           mensagem: formattedText,
@@ -676,7 +699,7 @@ export const evolutionApi = {
       const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
 
       try {
-        await supabase.from('conversa_whatsapp').insert({
+        await supabaseAdmin.from('conversa_whatsapp').insert({
           telefone_cliente: targetNumber,
           role: 'assistant',
           mensagem: formattedText,
@@ -728,7 +751,7 @@ export const evolutionApi = {
       const res = await this.sendHumanizedTextMessage(targetNumber, formattedText, settings, this.getInstanceName(), { mediaUrl });
 
       try {
-        await supabase.from('conversa_whatsapp').insert({
+        await supabaseAdmin.from('conversa_whatsapp').insert({
           telefone_cliente: targetNumber,
           role: 'assistant',
           mensagem: formattedText,

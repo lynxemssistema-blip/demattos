@@ -272,6 +272,67 @@ function AdminWhatsAppContent() {
     }
   };
 
+  /**
+   * Salva imediatamente uma chave/status no banco de dados Supabase e atualiza o estado
+   */
+  const handleToggleOrUpdateSetting = async (field, value, customSuccessMsg = null) => {
+    // 1. Atualiza estado React instantaneamente na interface
+    setSettings((prev) => ({ ...prev, [field]: value }));
+
+    // 2. Mapeamento do campo para a coluna chave na tabela configuracao
+    const dbKeyMap = {
+      modo_operacao: 'whatsapp_modo_operacao',
+      numero_teste_luan: 'whatsapp_numero_teste_luan',
+      confirmacao_ativa: 'whatsapp_confirmacao_ativo',
+      cancelamento_ativo: 'whatsapp_cancelamento_ativo',
+      lembrete_ativo: 'whatsapp_lembrete_ativo',
+      notificar_barbeiro_ativo: 'whatsapp_notificar_barbeiro_ativo',
+      lembrete_timing: 'whatsapp_lembrete_timing',
+      segundo_lembrete_ativo: 'whatsapp_segundo_lembrete_ativo',
+      segundo_lembrete_timing: 'whatsapp_segundo_lembrete_timing',
+      confirmacao_delay_modo: 'whatsapp_confirmacao_delay_modo',
+      antiban_simular_digitando: 'whatsapp_antiban_simular_digitando',
+      antiban_spintax_ativo: 'whatsapp_antiban_spintax_ativo',
+      antiban_delay_min: 'whatsapp_antiban_delay_min',
+      antiban_delay_max: 'whatsapp_antiban_delay_max',
+      antiban_janela_ativa: 'whatsapp_antiban_janela_ativa',
+      antiban_janela_inicio: 'whatsapp_antiban_janela_inicio',
+      antiban_janela_fim: 'whatsapp_antiban_janela_fim',
+      antiban_limite_hora: 'whatsapp_antiban_limite_hora',
+      antiban_rodape_optout: 'whatsapp_antiban_rodape_optout',
+      whatsapp_incluir_logo: 'whatsapp_incluir_logo',
+      whatsapp_logo_url: 'whatsapp_logo_url',
+      whatsapp_logo_em_confirmacao: 'whatsapp_logo_em_confirmacao',
+      whatsapp_logo_em_lembrete: 'whatsapp_logo_em_lembrete',
+      whatsapp_logo_em_cancelamento: 'whatsapp_logo_em_cancelamento',
+      whatsapp_logo_em_aviso_barbeiro: 'whatsapp_logo_em_aviso_barbeiro',
+      template_confirmacao: 'whatsapp_template_confirmacao',
+      template_cancelamento: 'whatsapp_template_cancelamento',
+      template_lembrete: 'whatsapp_template_lembrete',
+      template_aviso_barbeiro: 'whatsapp_template_aviso_barbeiro',
+    };
+
+    const dbKey = dbKeyMap[field] || field;
+
+    try {
+      const res = await evolutionApi.updateSingleSetting(dbKey, value);
+      if (res.success) {
+        if (customSuccessMsg) {
+          toast.success(customSuccessMsg);
+        } else {
+          toast.success('Configuração salva no banco de dados!');
+        }
+      } else {
+        toast.error('Erro ao salvar no banco: ' + (res.error || 'Falha de comunicação'));
+      }
+    } catch (e) {
+      console.error('Erro ao salvar no banco:', e);
+      toast.error('Erro ao salvar no banco: ' + e.message);
+    }
+  };
+
+  const updateSetting = handleToggleOrUpdateSetting;
+
   const handleSaveSettings = async () => {
     setSavingSettings(true);
     try {
@@ -519,22 +580,30 @@ function AdminWhatsAppContent() {
                   <Button
                     type="button"
                     size="sm"
-                    onClick={() => {
-                      setSettings({ ...settings, modo_operacao: 'teste' });
+                    onClick={async () => {
+                      await handleToggleOrUpdateSetting(
+                        'modo_operacao',
+                        'teste',
+                        '🧪 Modo Teste ativado e salvo no banco! Notificações irão apenas para o Barbeiro Luan.'
+                      );
                     }}
-                    className={`text-xs font-bold ${settings.modo_operacao === 'teste' ? 'bg-amber-500 hover:bg-amber-600 text-black' : 'bg-transparent text-gray-400 hover:text-white'}`}
+                    className={`text-xs font-bold transition-all ${settings.modo_operacao === 'teste' ? 'bg-amber-500 hover:bg-amber-600 text-black shadow-md' : 'bg-transparent text-gray-400 hover:text-white'}`}
                   >
                     🧪 Somente Teste (Luan)
                   </Button>
                   <Button
                     type="button"
                     size="sm"
-                    onClick={() => {
-                      if (window.confirm('Atenção: Ao ativar o Modo Oficial, os clientes reais receberão mensagens reais no WhatsApp ao agendarem. Deseja continuar?')) {
-                        setSettings({ ...settings, modo_operacao: 'oficial' });
+                    onClick={async () => {
+                      if (window.confirm('Atenção: Ao ativar o Modo Oficial, todos os clientes reais receberão mensagens reais no WhatsApp imediatamente ao agendarem. Deseja continuar?')) {
+                        await handleToggleOrUpdateSetting(
+                          'modo_operacao',
+                          'oficial',
+                          '🚀 Modo Oficial ativado e salvo no banco! Disparos habilitados para clientes reais.'
+                        );
                       }
                     }}
-                    className={`text-xs font-bold ${settings.modo_operacao === 'oficial' ? 'bg-[#25D366] hover:bg-[#20ba5a] text-black' : 'bg-transparent text-gray-400 hover:text-white'}`}
+                    className={`text-xs font-bold transition-all ${settings.modo_operacao === 'oficial' ? 'bg-[#25D366] hover:bg-[#20ba5a] text-black shadow-md' : 'bg-transparent text-gray-400 hover:text-white'}`}
                   >
                     🚀 Oficial (Clientes)
                   </Button>
@@ -546,8 +615,15 @@ function AdminWhatsAppContent() {
                     <Input
                       value={settings.numero_teste_luan}
                       onChange={(e) => setSettings({ ...settings, numero_teste_luan: e.target.value })}
+                      onBlur={(e) => handleToggleOrUpdateSetting('numero_teste_luan', e.target.value, 'Número do Barbeiro Luan salvo no banco!')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleToggleOrUpdateSetting('numero_teste_luan', e.target.value, 'Número do Barbeiro Luan salvo no banco!');
+                          e.target.blur();
+                        }
+                      }}
                       placeholder="5531973651924"
-                      className="h-8 text-xs w-36 bg-[#000]/70 border-[#444] text-amber-300 font-mono"
+                      className="h-8 text-xs w-36 bg-[#1a1a1a] border-[#444] text-amber-300 font-mono font-bold focus:border-[#D4AF37]"
                     />
                   </div>
                 </div>
@@ -1087,7 +1163,7 @@ function AdminWhatsAppContent() {
                     </div>
                     <Switch
                       checked={settings.lembrete_ativo}
-                      onCheckedChange={(c) => setSettings({ ...settings, lembrete_ativo: c })}
+                      onCheckedChange={(c) => handleToggleOrUpdateSetting('lembrete_ativo', c, c ? 'Disparo de lembrete ativado no banco!' : 'Disparo de lembrete desativado no banco!')}
                     />
                   </div>
 
@@ -1097,7 +1173,7 @@ function AdminWhatsAppContent() {
                     </label>
                     <Select
                       value={settings.lembrete_timing}
-                      onValueChange={(val) => setSettings({ ...settings, lembrete_timing: val })}
+                      onValueChange={(val) => handleToggleOrUpdateSetting('lembrete_timing', val, 'Momento do lembrete salvo no banco!')}
                     >
                       <SelectTrigger className="bg-[#1a1a1a] border-[#333] text-white text-xs">
                         <SelectValue placeholder="Selecione o momento" />
@@ -1124,7 +1200,7 @@ function AdminWhatsAppContent() {
                       </div>
                       <Switch
                         checked={settings.segundo_lembrete_ativo}
-                        onCheckedChange={(c) => setSettings({ ...settings, segundo_lembrete_ativo: c })}
+                        onCheckedChange={(c) => handleToggleOrUpdateSetting('segundo_lembrete_ativo', c, c ? 'Segundo lembrete ativado no banco!' : 'Segundo lembrete desativado no banco!')}
                       />
                     </div>
 
@@ -1133,7 +1209,7 @@ function AdminWhatsAppContent() {
                         <label className="text-[11px] text-gray-300">Momento do 2º Lembrete:</label>
                         <Select
                           value={settings.segundo_lembrete_timing}
-                          onValueChange={(val) => setSettings({ ...settings, segundo_lembrete_timing: val })}
+                          onValueChange={(val) => handleToggleOrUpdateSetting('segundo_lembrete_timing', val, 'Momento do 2º lembrete salvo no banco!')}
                         >
                           <SelectTrigger className="bg-[#111] border-[#333] text-white text-xs">
                             <SelectValue />
@@ -1168,7 +1244,7 @@ function AdminWhatsAppContent() {
                       </div>
                       <Switch
                         checked={settings.confirmacao_ativa}
-                        onCheckedChange={(c) => setSettings({ ...settings, confirmacao_ativa: c })}
+                        onCheckedChange={(c) => handleToggleOrUpdateSetting('confirmacao_ativa', c, c ? 'Confirmação automática ativada no banco!' : 'Confirmação automática desativada no banco!')}
                       />
                     </div>
 
@@ -1176,7 +1252,7 @@ function AdminWhatsAppContent() {
                       <label className="text-xs font-semibold text-gray-300">Ritmo de Envio:</label>
                       <Select
                         value={settings.confirmacao_delay_modo}
-                        onValueChange={(val) => setSettings({ ...settings, confirmacao_delay_modo: val })}
+                        onValueChange={(val) => handleToggleOrUpdateSetting('confirmacao_delay_modo', val, 'Ritmo de envio salvo no banco!')}
                       >
                         <SelectTrigger className="bg-[#1a1a1a] border-[#333] text-white text-xs">
                           <SelectValue />
@@ -1207,7 +1283,7 @@ function AdminWhatsAppContent() {
                       </div>
                       <Switch
                         checked={settings.notificar_barbeiro_ativo}
-                        onCheckedChange={(c) => setSettings({ ...settings, notificar_barbeiro_ativo: c })}
+                        onCheckedChange={(c) => handleToggleOrUpdateSetting('notificar_barbeiro_ativo', c, c ? 'Notificação para equipe ativada no banco!' : 'Notificação para equipe desativada no banco!')}
                       />
                     </div>
                   </CardContent>
@@ -1451,7 +1527,7 @@ function AdminWhatsAppContent() {
                     </div>
                     <Switch
                       checked={settings.antiban_simular_digitando}
-                      onCheckedChange={(c) => setSettings({ ...settings, antiban_simular_digitando: c })}
+                      onCheckedChange={(c) => handleToggleOrUpdateSetting('antiban_simular_digitando', c, c ? 'Simulação de digitação ativada no banco!' : 'Simulação de digitação desativada no banco!')}
                     />
                   </div>
 
@@ -1461,26 +1537,28 @@ function AdminWhatsAppContent() {
                     </label>
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
-                        <span className="text-[10px] text-gray-400 block mb-1">Mínimo (seg):</span>
+                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Mínimo (seg):</span>
                         <Input
                           type="number"
                           min="1"
-                          max="15"
+                          max="60"
                           value={settings.antiban_delay_min}
                           onChange={(e) => setSettings({ ...settings, antiban_delay_min: Number(e.target.value) })}
-                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                          onBlur={(e) => handleToggleOrUpdateSetting('antiban_delay_min', Number(e.target.value), 'Delay mínimo salvo no banco!')}
+                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
                         />
                       </div>
-                      <span className="text-gray-500 pt-4">até</span>
+                      <span className="text-gray-500 pt-4 font-bold">até</span>
                       <div className="flex-1">
-                        <span className="text-[10px] text-gray-400 block mb-1">Máximo (seg):</span>
+                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Máximo (seg):</span>
                         <Input
                           type="number"
-                          min="3"
-                          max="30"
+                          min="1"
+                          max="120"
                           value={settings.antiban_delay_max}
                           onChange={(e) => setSettings({ ...settings, antiban_delay_max: Number(e.target.value) })}
-                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                          onBlur={(e) => handleToggleOrUpdateSetting('antiban_delay_max', Number(e.target.value), 'Delay máximo salvo no banco!')}
+                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
                         />
                       </div>
                     </div>
@@ -1509,28 +1587,30 @@ function AdminWhatsAppContent() {
                     </div>
                     <Switch
                       checked={settings.antiban_janela_ativa}
-                      onCheckedChange={(c) => setSettings({ ...settings, antiban_janela_ativa: c })}
+                      onCheckedChange={(c) => handleToggleOrUpdateSetting('antiban_janela_ativa', c, c ? 'Bloqueio noturno ativado no banco!' : 'Bloqueio noturno desativado no banco!')}
                     />
                   </div>
 
                   {settings.antiban_janela_ativa && (
                     <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a]">
                       <div>
-                        <span className="text-[10px] text-gray-400 block mb-1">Início dos Disparos:</span>
+                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Início dos Disparos:</span>
                         <Input
                           type="time"
                           value={settings.antiban_janela_inicio}
                           onChange={(e) => setSettings({ ...settings, antiban_janela_inicio: e.target.value })}
-                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                          onBlur={(e) => handleToggleOrUpdateSetting('antiban_janela_inicio', e.target.value, 'Início dos disparos salvo no banco!')}
+                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
                         />
                       </div>
                       <div>
-                        <span className="text-[10px] text-gray-400 block mb-1">Fim dos Disparos:</span>
+                        <span className="text-[10px] text-gray-300 block mb-1 font-semibold">Fim dos Disparos:</span>
                         <Input
                           type="time"
                           value={settings.antiban_janela_fim}
                           onChange={(e) => setSettings({ ...settings, antiban_janela_fim: e.target.value })}
-                          className="bg-[#111] border-[#333] text-xs font-mono h-8"
+                          onBlur={(e) => handleToggleOrUpdateSetting('antiban_janela_fim', e.target.value, 'Fim dos disparos salvo no banco!')}
+                          className="bg-[#1e1e1e] border-[#444] text-white font-bold text-xs font-mono h-9 px-3 [color-scheme:dark] focus:border-[#D4AF37] focus:ring-1 focus:ring-[#D4AF37] rounded-md"
                         />
                       </div>
                     </div>
@@ -1543,7 +1623,7 @@ function AdminWhatsAppContent() {
                     </div>
                     <Switch
                       checked={settings.antiban_rodape_optout}
-                      onCheckedChange={(c) => setSettings({ ...settings, antiban_rodape_optout: c })}
+                      onCheckedChange={(c) => handleToggleOrUpdateSetting('antiban_rodape_optout', c, c ? 'Rodapé cortês ativado no banco!' : 'Rodapé cortês desativado no banco!')}
                     />
                   </div>
                 </CardContent>
@@ -1567,7 +1647,7 @@ function AdminWhatsAppContent() {
                     </div>
                     <Switch
                       checked={settings.antiban_spintax_ativo}
-                      onCheckedChange={(c) => setSettings({ ...settings, antiban_spintax_ativo: c })}
+                      onCheckedChange={(c) => handleToggleOrUpdateSetting('antiban_spintax_ativo', c, c ? 'Spintax dinâmico ativado no banco!' : 'Spintax dinâmico desativado no banco!')}
                     />
                   </div>
                   <p className="text-[11px] text-gray-400">
@@ -1591,7 +1671,7 @@ function AdminWhatsAppContent() {
                     <label className="text-xs text-gray-300">Teto Máximo Recomendado:</label>
                     <Select
                       value={String(settings.antiban_limite_hora)}
-                      onValueChange={(val) => setSettings({ ...settings, antiban_limite_hora: Number(val) })}
+                      onValueChange={(val) => handleToggleOrUpdateSetting('antiban_limite_hora', Number(val), 'Teto por hora salvo no banco!')}
                     >
                       <SelectTrigger className="bg-[#1a1a1a] border-[#333] text-white text-xs">
                         <SelectValue />
