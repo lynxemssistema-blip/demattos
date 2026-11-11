@@ -568,7 +568,10 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           senhaCanal
         } = formData;
 
-        if (!name || !phone || !email || !profissional_id || !data || !horario) {
+        const telefoneNormalizado = (phone || '').replace(/\D/g, '');
+        const emailNormalizado = (email && typeof email === 'string' && email.trim()) ? email.trim() : `${telefoneNormalizado}@cliente.demattos`;
+
+        if (!name || !phone || !profissional_id || !data || !horario) {
           return { data: { error: 'Por favor, preencha todos os campos obrigatórios.' } };
         }
 
@@ -576,7 +579,6 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           return { data: { error: 'Por favor, selecione pelo menos um serviço.' } };
         }
 
-        const telefoneNormalizado = phone.replace(/\D/g, '');
         if (telefoneNormalizado.length < 10) {
           return { data: { error: 'O telefone deve ter pelo menos 10 dígitos.' } };
         }
@@ -648,19 +650,19 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           const { data: clienteExistente } = await supabase
             .from('cliente')
             .select('*')
-            .or(`telefone.eq.${telefoneNormalizado},email.ilike.${email.trim()}`)
+            .or(`telefone.eq.${telefoneNormalizado},email.ilike.${emailNormalizado}`)
             .maybeSingle();
 
           if (clienteExistente) {
             await supabase.from('cliente').update({
               nome: name,
-              email: email.trim()
+              email: emailNormalizado
             }).eq('id', clienteExistente.id);
           } else {
             await supabase.from('cliente').insert({
               nome: name,
               telefone: telefoneNormalizado,
-              email: email.trim(),
+              email: emailNormalizado,
               observacoes: message || '',
               tem_canal: !!senhaCanal,
               senha_canal: senhaCanal || null,
@@ -1189,8 +1191,26 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
       case 'verificarClientePorTelefone': {
         const { telefone } = params;
-        const { data } = await supabase.from('cliente').select('*').eq('telefone', telefone).maybeSingle();
-        return { data: { exists: !!data, cliente: data || null } };
+        const rawTel = (telefone || '').replace(/\D/g, '');
+        let cliente = null;
+
+        if (rawTel.length >= 8) {
+          const { data } = await supabase
+            .from('cliente')
+            .select('*')
+            .or(`telefone.eq.${telefone},telefone.eq.${rawTel},telefone.ilike.%${rawTel.slice(-8)}%`)
+            .limit(1)
+            .maybeSingle();
+          cliente = data;
+        }
+
+        return {
+          data: {
+            success: true,
+            exists: !!cliente,
+            cliente: cliente || null
+          }
+        };
       }
 
       case 'getAgendamentosPublicosCount': {

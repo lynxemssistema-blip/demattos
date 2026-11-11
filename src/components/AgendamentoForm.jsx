@@ -80,39 +80,44 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
   }, [formData.horario, formData.servico_id]);
 
   useEffect(() => {
-    if (!clientePreenchido && formData.cliente_telefone && formData.cliente_telefone.length >= 10) {
+    if (!clientePreenchido && !formData.cliente_id && formData.cliente_telefone && formData.cliente_telefone.length >= 10) {
       const timeoutId = setTimeout(() => {
         verificarClienteExistente();
       }, 500);
       return () => clearTimeout(timeoutId);
-    } else if (!clientePreenchido) {
+    } else if (!clientePreenchido && !formData.cliente_id && !isAdmin) {
       setClienteExistente(null);
     }
-  }, [formData.cliente_telefone]);
+  }, [formData.cliente_telefone, formData.cliente_id, clientePreenchido, isAdmin]);
 
   const verificarClienteExistente = useCallback(async () => {
+    if (!formData.cliente_telefone || formData.cliente_telefone.length < 8) return;
     setVerificandoCliente(true);
     try {
       const response = await base44.functions.invoke('verificarClientePorTelefone', {
         telefone: formData.cliente_telefone
       });
       
-      if (response.data.success && response.data.cliente) {
-        setClienteExistente(response.data.cliente);
+      const foundClient = response.data?.cliente;
+      if (foundClient) {
+        setClienteExistente(foundClient);
         setFormData(prev => ({
           ...prev,
-          cliente_nome: response.data.cliente.nome,
-          cliente_email: response.data.cliente.email || prev.cliente_email,
+          cliente_id: prev.cliente_id || foundClient.id,
+          cliente_nome: prev.cliente_nome || foundClient.nome,
+          cliente_email: prev.cliente_email || foundClient.email || '',
         }));
-      } else {
+      } else if (!isAdmin && !formData.cliente_id) {
         setClienteExistente(null);
       }
     } catch (error) {
-      setClienteExistente(null);
+      if (!isAdmin && !formData.cliente_id) {
+        setClienteExistente(null);
+      }
     } finally {
       setVerificandoCliente(false);
     }
-  }, [formData.cliente_telefone]);
+  }, [formData.cliente_telefone, isAdmin, formData.cliente_id]);
 
   const loadClientes = async () => {
     try {
@@ -125,7 +130,7 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
   };
 
   const handleClienteSelect = (clienteId) => {
-    const cliente = clientes.find(c => c.id === clienteId);
+    const cliente = clientes.find(c => String(c.id) === String(clienteId));
     if (cliente) {
       setFormData(prev => ({
         ...prev,
@@ -133,7 +138,6 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
         cliente_nome: cliente.nome,
         cliente_telefone: cliente.telefone,
         cliente_email: cliente.email || '',
-        // SEGURANÇA: NUNCA trafegar senha_canal do backend para frontend
       }));
       setClienteExistente(cliente);
     }
@@ -210,8 +214,9 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
       }
     }
 
-    // Se é novo cliente, validar email e senha
-    if (!clienteExistente) {
+    // Se é novo cliente (no agendamento público), validar email e senha
+    // Administradores e agendamentos já preenchidos NUNCA são bloqueados por senha de canal
+    if (!isAdmin && !clientePreenchido && !clienteExistente) {
       if (!formData.cliente_email) {
         toast.error('Email é obrigatório para novos clientes');
         return;
@@ -236,11 +241,14 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
       const servicoSelecionado = servicos.find(s => s.id === formData.servico_id);
       const profissionalSelecionado = profissionais.find(p => p.id === formData.profissional_id);
 
+      const rawTel = (formData.cliente_telefone || '').replace(/\D/g, '');
+      const clienteEmail = formData.cliente_email || (isAdmin ? `${rawTel}@cliente.demattos` : '');
+
       // Preparar dados do formulário - garantir data em formato local
       const agendamentoData = {
         name: formData.cliente_nome,
         phone: formData.cliente_telefone,
-        email: formData.cliente_email,
+        email: clienteEmail,
         profissional_id: formData.profissional_id,
         servicos_ids: [formData.servico_id],
         data: formData.data,
@@ -248,7 +256,7 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
         message: formData.observacoes,
         instagram: '',
         facebook: '',
-        senhaCanal: formData.cliente_senha
+        senhaCanal: formData.cliente_senha || null
       };
 
       // Invalidar queries relacionadas após sucesso
