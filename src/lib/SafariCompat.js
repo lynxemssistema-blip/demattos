@@ -67,18 +67,22 @@ class SafeStorage {
 
 export const safeStorage = new SafeStorage();
 
+import { getBrazilDateString } from './brazilTime';
+
 /**
- * Formata data em YYYY-MM-DD
+ * Formata data em YYYY-MM-DD (respeitando fuso do Brasil)
  * Input: Date object ou string ISO
  * Output: string YYYY-MM-DD
  */
 export function formatDateForInput(date) {
   if (!date) return '';
-  const d = new Date(date);
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${year}-${month}-${day}`;
+  if (typeof date === 'string') {
+    const datePart = date.split('T')[0];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      return datePart;
+    }
+  }
+  return getBrazilDateString(date);
 }
 
 /**
@@ -201,19 +205,27 @@ export function normalizeDateForSafari(dateStr) {
 export function createSafariDate(dateInput) {
   if (!dateInput) return null;
   
-  // Se é Date, converter para string ISO primeiro
-  let dateStr = typeof dateInput === 'string' ? dateInput : dateInput.toISOString().split('T')[0];
+  // Se é Date, converter para string YYYY-MM-DD no fuso do Brasil (evita virada UTC às 21h)
+  let rawStr = typeof dateInput === 'string' ? dateInput.trim() : getBrazilDateString(dateInput);
   
-  // Truncar parte de hora se existir (ex: "2026-04-11T19:30" → "2026-04-11")
-  if (typeof dateStr === 'string' && dateStr.includes('T')) {
-    dateStr = dateStr.split('T')[0];
+  let datePart = rawStr;
+  let timePart = '';
+  if (typeof rawStr === 'string' && rawStr.includes('T')) {
+    const parts = rawStr.split('T');
+    datePart = parts[0];
+    const cleanTime = (parts[1] || '').replace(/Z|[+-]\d{2}:?\d{2}$/, '');
+    if (/^\d{2}:\d{2}/.test(cleanTime)) {
+      timePart = cleanTime.length === 5 ? `${cleanTime}:00` : cleanTime.substring(0, 8);
+    }
   }
   
-  // Normalizar para formato Safari-safe (YYYY/MM/DD)
-  const safeDateStr = normalizeDateForSafari(dateStr);
+  // Normalizar para formato Safari-safe (YYYY/MM/DD [HH:mm:ss])
+  const safeDateStr = normalizeDateForSafari(datePart);
+  if (!safeDateStr) return null;
+  const fullSafariStr = timePart ? `${safeDateStr} ${timePart}` : safeDateStr;
   
   try {
-    const date = new Date(safeDateStr);
+    const date = new Date(fullSafariStr);
     // Validar se é data válida
     if (isNaN(date.getTime())) {
       console.warn('Data inválida:', dateInput);

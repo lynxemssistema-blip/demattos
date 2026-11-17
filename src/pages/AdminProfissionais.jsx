@@ -15,6 +15,7 @@ import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { getBrazilNowParts, formatLocalDateYYYYMMDD } from '@/lib/brazilTime';
 
 function AdminProfissionaisContent() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -131,8 +132,8 @@ function AdminProfissionaisContent() {
   };
 
   const gerarHorariosDisponiveis = async (profissionalId, profissionalNome) => {
-    const hoje = new Date();
-    const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+    const { year: anoBr, month: mesBr, day: diaBr } = getBrazilNowParts();
+    const ultimoDiaMes = new Date(anoBr, mesBr, 0);
     
     const horarios = [];
     
@@ -146,8 +147,8 @@ function AdminProfissionaisContent() {
       almocoFim = horaAlmocoFim * 60 + minAlmocoFim;
     }
     
-    for (let dia = hoje.getDate(); dia <= ultimoDiaMes.getDate(); dia++) {
-      const data = new Date(hoje.getFullYear(), hoje.getMonth(), dia);
+    for (let dia = diaBr; dia <= ultimoDiaMes.getDate(); dia++) {
+      const data = new Date(anoBr, mesBr - 1, dia);
       const diaSemana = data.getDay();
       
       if (configAgenda.dias_semana.includes(diaSemana)) {
@@ -168,7 +169,7 @@ function AdminProfissionaisContent() {
             horarios.push({
               profissional_id: profissionalId,
               profissional_nome: profissionalNome,
-              data: data.toISOString().split('T')[0],
+              data: formatLocalDateYYYYMMDD(data),
               horario: `${horas}:${minutos}`,
               disponivel: true
             });

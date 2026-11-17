@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight, Trash2, Zap, User } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { createSafariDate } from '@/lib/SafariCompat';
+import { getBrazilDateString } from '@/lib/brazilTime';
 
 const statusColors = {
   pendente: 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -23,7 +24,7 @@ export default function AgendamentosCalendarView({
   onDelete,
   onOpenDailyAgenda
 }) {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(() => createSafariDate(getBrazilDateString()) || new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -129,7 +130,7 @@ export default function AgendamentosCalendarView({
           const dateKey = format(day, 'yyyy-MM-dd');
           const agendamentosNoDia = agendamentosPorData[dateKey] || [];
           const temAgendamentos = agendamentosNoDia.length > 0;
-          const isToday = isSameDay(day, new Date());
+          const isToday = dateKey === getBrazilDateString();
 
           return (
             <button

@@ -2,6 +2,7 @@ import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ResponsiveProfissionalPicker } from '../ResponsiveProfissionalPicker';
+import { getBrazilDateString } from '@/lib/brazilTime';
 
 
 export function AgendamentoFormFields({
@@ -142,7 +143,7 @@ export function AgendamentoFormFields({
             onChange={(e) => {
               setFormData(prev => ({ ...prev, data: e.target.value, horario: '' }));
             }}
-            min={new Date().toISOString().split('T')[0]}
+            min={getBrazilDateString()}
             required
             disabled={!formData.profissional_id}
             className="bg-[#0a0a0a] border-[#2a2a2a] text-white focus:border-[#D4AF37] h-12 sm:h-10 text-base sm:text-sm [color-scheme:dark]"

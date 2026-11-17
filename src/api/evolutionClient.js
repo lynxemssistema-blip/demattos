@@ -1,4 +1,5 @@
 import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
+import { getBrazilHour, getBrazilMinutesNow, getBrazilNowParts } from '@/lib/brazilTime';
 
 const DEFAULT_API_URL = import.meta.env.VITE_EVOLUTION_API_URL || 'https://evo.lynxems.com.br';
 const DEFAULT_API_KEY = import.meta.env.VITE_EVOLUTION_API_KEY || 'F10230BCFE78-4B5A-80F3-789AD4E58B79';
@@ -30,10 +31,33 @@ export function processSpintax(text) {
  * Retorna uma saudação humanizada dinâmica baseada no horário atual (Bom dia, Boa tarde, Boa noite).
  */
 export function getSaudacaoPeriodo() {
-  const hora = new Date().getHours();
+  const hora = getBrazilHour();
   if (hora >= 5 && hora < 12) return 'Bom dia';
   if (hora >= 12 && hora < 18) return 'Boa tarde';
   return 'Boa noite';
+}
+
+/**
+ * Valida URLs de foto de perfil do WhatsApp CDN (pps.whatsapp.net / fbcdn.net).
+ * As URLs assinadas da Meta trazem o parâmetro hexadecimal `oe=` (timestamp Unix de expiração).
+ * Filtrar URLs já expiradas ANTES de renderizar <img> elimina 100% dos erros `403 (Forbidden)` no console.
+ */
+export function sanitizeWhatsAppAvatarUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return null;
+
+  const oeMatch = trimmed.match(/[?&]oe=([0-9a-fA-F]+)/);
+  if (oeMatch && oeMatch[1]) {
+    const expSec = parseInt(oeMatch[1], 16);
+    if (!isNaN(expSec)) {
+      // Margem de segurança de 5 minutos antes da expiração
+      if (expSec * 1000 <= Date.now() + 5 * 60 * 1000) {
+        return null;
+      }
+    }
+  }
+  return trimmed;
 }
 
 export const DEFAULT_TEMPLATES = {
@@ -93,6 +117,28 @@ Acesse o painel para acompanhar sua agenda!`,
 📅 *Data:* {{data}} às {{horario}}
 
 O horário foi liberado novamente na sua agenda.`,
+
+  reagendamento: `{💈 *Barbearia DeMattos* 💈|✂️ *DeMattos Visage* ✂️}
+
+{{saudacao_periodo}}, *{{cliente_nome}}*! {Seu agendamento foi atualizado com sucesso|Confirmamos o novo horário do seu atendimento}. 🔄✅
+
+✂️ *Profissional:* {{barbeiro_nome}}
+🛠️ *Serviço:* {{servico}}
+📅 *Nova Data:* {{data}}
+⏰ *Novo Horário:* {{horario}}
+📍 *Endereço:* {{endereco}}
+
+{Te esperamos no novo horário marcado!|Agradecemos a preferência! Qualquer dúvida, fale conosco por aqui.} 💈`,
+
+  aviso_barbeiro_reagendamento: `💈 *Horário de Agendamento Atualizado* 💈
+
+{{saudacao_periodo}}, *{{barbeiro_nome}}*! Um agendamento teve o horário atualizado na agenda:
+
+👤 *Cliente:* {{cliente_nome}}
+📱 *Telefone:* {{cliente_telefone}}
+🛠️ *Serviço:* {{servico}}
+📅 *Nova Data:* {{data}}
+⏰ *Novo Horário:* {{horario}}`,
 
   marketing: `💈 *Barbearia DeMattos* | *Sua Imagem, Seu Sucesso* ✂️🔥
 
@@ -173,9 +219,11 @@ export const evolutionApi = {
     try {
       const res = await this.request(`/instance/fetchInstances?instanceName=${instanceName}`);
       if (Array.isArray(res.data) && res.data.length > 0) {
+        const inst = { ...res.data[0] };
+        inst.profilePicUrl = sanitizeWhatsAppAvatarUrl(inst.profilePicUrl);
         return {
           success: true,
-          instance: res.data[0]
+          instance: inst
         };
       }
       return {
@@ -269,7 +317,7 @@ export const evolutionApi = {
               id: c.id || rawPhone,
               nome: (c.pushName || c.name || 'Lead WhatsApp').trim(),
               telefone: rawPhone,
-              profilePicUrl: c.profilePicUrl || null,
+              profilePicUrl: sanitizeWhatsAppAvatarUrl(c.profilePicUrl),
               origem: 'agenda_evolution'
             };
           })
@@ -391,16 +439,16 @@ export const evolutionApi = {
       // NUNCA devem ser bloqueadas, pois o usuário acabou de interagir e aguarda o retorno imediato.
       const isTransactionalImmediate = options.isImmediate || 
                                        options.tipo === 'confirmacao' || 
+                                       options.tipo === 'reagendamento' ||
                                        options.tipo === 'aviso_barbeiro_novo' || 
+                                       options.tipo === 'aviso_barbeiro_reagendamento' ||
                                        options.tipo === 'cancelamento' || 
                                        options.tipo === 'aviso_barbeiro_cancelamento' ||
                                        options.bypassWindow;
 
       if (settings.antiban_janela_ativa && !isTransactionalImmediate) {
-        const now = new Date();
-        const currentHours = now.getHours();
-        const currentMinutes = now.getMinutes();
-        const currentTotalMin = currentHours * 60 + currentMinutes;
+        const currentTotalMin = getBrazilMinutesNow();
+        const { hourStr, minuteStr } = getBrazilNowParts();
 
         const [iniH, iniM] = (settings.antiban_janela_inicio || '08:00').split(':').map(Number);
         const [fimH, fimM] = (settings.antiban_janela_fim || '23:59').split(':').map(Number);
@@ -408,7 +456,7 @@ export const evolutionApi = {
         const fimTotalMin = (fimH || 23) * 60 + (fimM || 59);
 
         if (currentTotalMin < inicioTotalMin || currentTotalMin > fimTotalMin) {
-          console.warn(`[Anti-Ban] Envio cancelado fora da janela permitida (${settings.antiban_janela_inicio} às ${settings.antiban_janela_fim}). Hora atual: ${now.toLocaleTimeString()}`);
+          console.warn(`[Anti-Ban] Envio cancelado fora da janela permitida (${settings.antiban_janela_inicio} às ${settings.antiban_janela_fim}). Hora Brasília: ${hourStr}:${minuteStr}`);
           return {
             success: false,
             skipped: true,
@@ -417,23 +465,28 @@ export const evolutionApi = {
         }
       }
 
-      // 2. Simular Digitação ("composing") se ativado
+      // 2. Simular Digitação ("composing"): curto (~800ms) em transacionais imediatas para não congelar no Safari iOS
       if (settings.antiban_simular_digitando) {
         try {
-          await this.sendPresence(number, 'composing', 2000, instanceName);
-          const typingWait = Math.floor(Math.random() * 1200) + 1800; // 1.8s a 3s
+          const presenceMs = isTransactionalImmediate ? 900 : 2000;
+          await this.sendPresence(number, 'composing', presenceMs, instanceName);
+          const typingWait = isTransactionalImmediate
+            ? 800
+            : (Math.floor(Math.random() * 1200) + 1800);
           await new Promise(r => setTimeout(r, typingWait));
         } catch (ePresence) {
           // Continua mesmo se o status presence falhar
         }
       }
 
-      // 3. Delay com Jitter aleatório para quebrar padrões da Meta
-      const minSec = Math.max(1, settings.antiban_delay_min || 3);
-      const maxSec = Math.max(minSec, settings.antiban_delay_max || 8);
-      const randomDelayMs = Math.floor(Math.random() * ((maxSec - minSec) * 1000 + 1)) + (minSec * 1000);
-      if (randomDelayMs > 0) {
-        await new Promise(r => setTimeout(r, randomDelayMs));
+      // 3. Delay Anti-Ban de campanha (SOMENTE para campanhas/disparos em massa; NUNCA segurar confirmações de agendamento por minutos!)
+      if (!isTransactionalImmediate) {
+        const minSec = Math.max(1, settings.antiban_delay_min || 3);
+        const maxSec = Math.max(minSec, settings.antiban_delay_max || 8);
+        const randomDelayMs = Math.floor(Math.random() * ((maxSec - minSec) * 1000 + 1)) + (minSec * 1000);
+        if (randomDelayMs > 0) {
+          await new Promise(r => setTimeout(r, randomDelayMs));
+        }
       }
 
       // 4. Envio oficial (com mídia/logo se fornecido, fallback transparente para texto)
@@ -471,13 +524,16 @@ export const evolutionApi = {
     const primeiroNome = (data.cliente_nome || 'Cliente').trim().split(' ')[0];
     const saudacao = getSaudacaoPeriodo();
 
-    let dataFormatada = data.data || '';
-    if (dataFormatada && dataFormatada.includes('-')) {
-      const parts = dataFormatada.split('-');
+    const rawDate = String(data.data || '').trim().split('T')[0];
+    let dataFormatada = rawDate;
+    if (rawDate && rawDate.includes('-')) {
+      const parts = rawDate.split('-');
       if (parts.length === 3) {
         dataFormatada = `${parts[2]}/${parts[1]}/${parts[0]}`;
       }
     }
+
+    const horarioLimpo = String(data.horario || '').trim().slice(0, 5);
 
     let text = template
       .replace(/\{\{\s*saudacao_periodo\s*\}\}/gi, saudacao)
@@ -487,7 +543,7 @@ export const evolutionApi = {
       .replace(/\{\{\s*barbeiro_nome\s*\}\}/gi, data.barbeiro_nome || data.profissional_nome || 'Luan')
       .replace(/\{\{\s*servico\s*\}\}/gi, data.servico || 'Corte e Barba')
       .replace(/\{\{\s*data\s*\}\}/gi, dataFormatada)
-      .replace(/\{\{\s*horario\s*\}\}/gi, data.horario || '')
+      .replace(/\{\{\s*horario\s*\}\}/gi, horarioLimpo)
       .replace(/\{\{\s*endereco\s*\}\}/gi, data.endereco || 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem')
       .replace(/\{\{\s*telefone_barbearia\s*\}\}/gi, data.telefone_barbearia || '(31) 97365-1924')
       .replace(/\{\{\s*numero_agendamento\s*\}\}/gi, data.codigo_unico || (data.numero_agendamento ? `#${data.numero_agendamento}` : ''))
@@ -686,17 +742,19 @@ export const evolutionApi = {
 
       // Se for mensagem customizada direta (acionada pelo admin), não barra por switch inativo
       if (!options.customMessage) {
-        if (tipo === 'confirmacao' && !settings.confirmacao_ativa) return { skipped: true, reason: 'Desativado' };
+        if ((tipo === 'confirmacao' || tipo === 'reagendamento') && !settings.confirmacao_ativa) return { skipped: true, reason: 'Desativado' };
         if (tipo === 'cancelamento' && !settings.cancelamento_ativo) return { skipped: true, reason: 'Desativado' };
         if (tipo === 'lembrete' && !settings.lembrete_ativo) return { skipped: true, reason: 'Desativado' };
-        if (tipo === 'aviso_barbeiro' && !settings.notificar_barbeiro_ativo) return { skipped: true, reason: 'Desativado' };
+        if ((tipo === 'aviso_barbeiro' || tipo === 'aviso_barbeiro_reagendamento') && !settings.notificar_barbeiro_ativo) return { skipped: true, reason: 'Desativado' };
       }
 
       // Obter template correto
       let template = settings.template_confirmacao;
+      if (tipo === 'reagendamento') template = DEFAULT_TEMPLATES.reagendamento;
       if (tipo === 'cancelamento') template = settings.template_cancelamento;
       if (tipo === 'lembrete') template = settings.template_lembrete;
       if (tipo === 'aviso_barbeiro') template = settings.template_aviso_barbeiro;
+      if (tipo === 'aviso_barbeiro_reagendamento') template = DEFAULT_TEMPLATES.aviso_barbeiro_reagendamento;
 
       let formattedText = options.customMessage
         ? options.customMessage
@@ -721,10 +779,10 @@ export const evolutionApi = {
       let mediaUrl = null;
       if (settings.whatsapp_incluir_logo) {
         const logo = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
-        if (tipo === 'confirmacao' && settings.whatsapp_logo_em_confirmacao) mediaUrl = logo;
+        if ((tipo === 'confirmacao' || tipo === 'reagendamento') && settings.whatsapp_logo_em_confirmacao) mediaUrl = logo;
         if (tipo === 'lembrete' && settings.whatsapp_logo_em_lembrete) mediaUrl = logo;
         if (tipo === 'cancelamento' && settings.whatsapp_logo_em_cancelamento) mediaUrl = logo;
-        if (tipo === 'aviso_barbeiro' && settings.whatsapp_logo_em_aviso_barbeiro) mediaUrl = logo;
+        if ((tipo === 'aviso_barbeiro' || tipo === 'aviso_barbeiro_reagendamento') && settings.whatsapp_logo_em_aviso_barbeiro) mediaUrl = logo;
       }
 
       // Envio humanizado (digitando + jitter + janela de horário + logo/mídia se ativa)

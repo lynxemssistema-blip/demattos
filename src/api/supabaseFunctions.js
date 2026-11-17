@@ -1,5 +1,13 @@
 import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { evolutionApi } from '@/api/evolutionClient';
+import {
+  getBrazilDateString,
+  getBrazilYearMonth,
+  getBrazilMinutesNow,
+  getBrazilDateOffset,
+  getBrazilNowParts,
+  formatLocalDateYYYYMMDD,
+} from '@/lib/brazilTime';
 
 export async function invokeSupabaseFunction(functionName, params = {}) {
   try {
@@ -30,6 +38,9 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           supabase.from('instagram_video').select('*').eq('ativo', true).order('ordem', { ascending: false }),
           supabase.from('agendamento').select('*', { count: 'exact', head: true }).eq('status', 'realizado')
         ]);
+
+        if (servicosRes.error) throw servicosRes.error;
+        if (profissionaisRes.error) throw profissionaisRes.error;
 
         const sobre = sobreRes.data?.[0] || null;
         const totalAtendimentos = (sobre?.atendimentos_base || 5000) + (atendimentosCountRes.count || 0);
@@ -135,8 +146,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         let valorPendente = 0;
         let comprasPendentesQtd = 0;
 
-        const hoje = new Date();
-        const mesAtualStr = hoje.toISOString().substring(0, 7);
+        const mesAtualStr = getBrazilYearMonth();
 
         (compras || []).forEach(c => {
           const val = Number(c.valor) || 0;
@@ -147,7 +157,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           if (isPago) {
             volumeBrutoTotal += val;
             quantidadeVendasTotal += 1;
-            if (c.created_date && c.created_date.startsWith(mesAtualStr)) {
+            if (c.created_date && getBrazilYearMonth(c.created_date) === mesAtualStr) {
               volumeBrutoMes += val;
               quantidadeVendasMes += 1;
             }
@@ -161,7 +171,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           const preco = servicosMap.get(ag.servico?.toLowerCase()) || 0;
           volumeBrutoTotal += preco;
           quantidadeVendasTotal += 1;
-          if (ag.created_date && ag.created_date.startsWith(mesAtualStr)) {
+          if (ag.created_date && getBrazilYearMonth(ag.created_date) === mesAtualStr) {
             volumeBrutoMes += preco;
             quantidadeVendasMes += 1;
           }
@@ -169,9 +179,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         const ultimos7Dias = [];
         for (let i = 6; i >= 0; i--) {
-          const d = new Date(hoje);
-          d.setDate(d.getDate() - i);
-          const dateStr = d.toISOString().split('T')[0];
+          const dateStr = getBrazilDateOffset(-i);
           ultimos7Dias.push({
             data: dateStr,
             total: 0
@@ -493,14 +501,9 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         const fimGradeMin = hFim * 60 + mFim;
         const intervalo = Number(config.intervalo_minutos) || 30;
 
-        // Horário atual no fuso de Brasília
-        const agora = new Date();
-        const agoraSp = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-        const anoStr = agoraSp.getFullYear();
-        const mesStr = String(agoraSp.getMonth() + 1).padStart(2, '0');
-        const dStr = String(agoraSp.getDate()).padStart(2, '0');
-        const hojeStr = `${anoStr}-${mesStr}-${dStr}`;
-        const minutosAgora = agoraSp.getHours() * 60 + agoraSp.getMinutes();
+        // Horário atual no fuso oficial do Brasil (America/Sao_Paulo) - 100% compatível com Safari/iOS
+        const hojeStr = getBrazilDateString();
+        const minutosAgora = getBrazilMinutesNow();
         const ehHoje = (data === hojeStr);
 
         const todosSlots = new Set();
@@ -569,7 +572,8 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         } = formData;
 
         const telefoneNormalizado = (phone || '').replace(/\D/g, '');
-        const emailNormalizado = (email && typeof email === 'string' && email.trim()) ? email.trim() : `${telefoneNormalizado}@cliente.demattos`;
+        const emailInformado = (email && typeof email === 'string' && email.trim()) ? email.trim() : '';
+        const emailFallback = emailInformado || `${telefoneNormalizado}@cliente.demattos`;
 
         if (!name || !phone || !profissional_id || !data || !horario) {
           return { data: { error: 'Por favor, preencha todos os campos obrigatórios.' } };
@@ -645,24 +649,32 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         const confirmadoAuto = configConf ? (configConf.valor === 'true') : true;
 
-        // Upsert do cliente
+        // Upsert do cliente (sem sobrescrever email real existente caso não tenha sido informado)
         try {
+          const sufixoTel = telefoneNormalizado.slice(-8);
+          const orClauses = [`telefone.eq.${telefoneNormalizado}`, `telefone.ilike.%${sufixoTel}%`];
+          if (emailInformado) {
+            orClauses.push(`email.ilike.${emailInformado}`);
+          }
+
           const { data: clienteExistente } = await supabase
             .from('cliente')
             .select('*')
-            .or(`telefone.eq.${telefoneNormalizado},email.ilike.${emailNormalizado}`)
+            .or(orClauses.join(','))
+            .limit(1)
             .maybeSingle();
 
           if (clienteExistente) {
-            await supabase.from('cliente').update({
-              nome: name,
-              email: emailNormalizado
-            }).eq('id', clienteExistente.id);
+            const payloadUpdate = { nome: name };
+            if (emailInformado) {
+              payloadUpdate.email = emailInformado;
+            }
+            await supabase.from('cliente').update(payloadUpdate).eq('id', clienteExistente.id);
           } else {
             await supabase.from('cliente').insert({
               nome: name,
               telefone: telefoneNormalizado,
-              email: emailNormalizado,
+              email: emailFallback,
               observacoes: message || '',
               tem_canal: !!senhaCanal,
               senha_canal: senhaCanal || null,
@@ -720,17 +732,21 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           // Não bloqueia agendamento
         }
 
-        // Disparo automático WhatsApp ao cliente (respeita modo oficial vs teste)
+        // Disparo transacional imediato WhatsApp com await (~1s, sem delay de campanha, evita congelar em background no iPhone/Safari)
+        const tarefasWhatsApp = [];
         if (confirmadoAuto) {
-          evolutionApi.sendAppointmentNotification('confirmacao', novoAgendamento).catch(err => {
-            console.warn('[WhatsApp] Aviso ao enviar notificação de agendamento ao cliente:', err);
-          });
+          tarefasWhatsApp.push(
+            evolutionApi.sendAppointmentNotification('confirmacao', novoAgendamento).catch(err => {
+              console.warn('[WhatsApp] Aviso ao enviar notificação de agendamento ao cliente:', err);
+            })
+          );
         }
-
-        // Disparo automático WhatsApp ao barbeiro (novo agendamento recebido)
-        evolutionApi.notifyBarberNewAppointment(novoAgendamento, prof.telefone).catch(err => {
-          console.warn('[WhatsApp] Aviso ao enviar notificação ao barbeiro:', err);
-        });
+        tarefasWhatsApp.push(
+          evolutionApi.notifyBarberNewAppointment(novoAgendamento, prof.telefone).catch(err => {
+            console.warn('[WhatsApp] Aviso ao enviar notificação ao barbeiro:', err);
+          })
+        );
+        await Promise.allSettled(tarefasWhatsApp);
 
         return {
           data: {
@@ -850,6 +866,12 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         }).select().single();
 
         if (agErr) throw agErr;
+
+        await Promise.allSettled([
+          evolutionApi.sendAppointmentNotification('confirmacao', ag),
+          evolutionApi.notifyBarberNewAppointment(ag, profs.telefone)
+        ]);
+
         return { data: { success: true, agendamento: ag } };
       }
 
@@ -873,9 +895,9 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
         const horarioFim = `${Math.floor(fimMin / 60).toString().padStart(2, '0')}:${(fimMin % 60).toString().padStart(2, '0')}`;
 
         const datas = [];
-        const hoje = new Date();
+        const { year: anoBr, month: mesBr, day: diaBr } = getBrazilNowParts();
         const diaSelecionado = parseInt(formData.dia_semana, 10);
-        let dataAtual = new Date(hoje);
+        let dataAtual = new Date(anoBr, mesBr - 1, diaBr);
 
         while (dataAtual.getDay() !== diaSelecionado) {
           dataAtual.setDate(dataAtual.getDate() + 1);
@@ -899,7 +921,7 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           profissional_id: prof.id,
           profissional_nome: prof.nome,
           servico: serv.nome,
-          data: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+          data: formatLocalDateYYYYMMDD(d),
           horario: formData.horario,
           horario_fim: horarioFim,
           duracao_total: duracao,
@@ -915,6 +937,14 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           .select();
 
         if (insErr) throw insErr;
+
+        if (criados && criados.length > 0) {
+          await Promise.allSettled([
+            evolutionApi.sendAppointmentNotification('confirmacao', criados[0]),
+            evolutionApi.notifyBarberNewAppointment(criados[0], prof.telefone)
+          ]);
+        }
+
         return { data: { success: true, quantidade: criados?.length || 0, agendamentos: criados } };
       }
 
@@ -952,15 +982,107 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
       }
 
       case 'updateAgendamentoProfissional': {
-        const { agendamento_id, ...updates } = params;
-        const { data, error } = await supabase
+        const { agendamento_id, profissional_id, action, data: actionData, ...restUpdates } = params;
+        if (!agendamento_id) {
+          return { data: { error: 'ID do agendamento é obrigatório.' } };
+        }
+
+        const { data: agAnterior } = await supabaseAdmin
           .from('agendamento')
-          .update(updates)
+          .select('*')
+          .eq('id', agendamento_id)
+          .maybeSingle();
+
+        if (!agAnterior) {
+          return { data: { error: 'Agendamento não encontrado.' } };
+        }
+
+        if (action === 'delete') {
+          try {
+            await supabaseAdmin
+              .from('horario_disponivel')
+              .update({ disponivel: true })
+              .eq('profissional_id', agAnterior.profissional_id)
+              .eq('data', agAnterior.data)
+              .eq('horario', agAnterior.horario);
+          } catch (e) {}
+
+          const { error: delErr } = await supabaseAdmin
+            .from('agendamento')
+            .delete()
+            .eq('id', agendamento_id);
+
+          if (delErr) throw delErr;
+          return { data: { success: true } };
+        }
+
+        const payload = action ? { ...(actionData || {}) } : { ...restUpdates };
+
+        // Se o horário mudou, recalcular horario_fim com base na duracao_total
+        if (payload.horario && payload.horario !== agAnterior.horario) {
+          const [nh, nm] = String(payload.horario).slice(0, 5).split(':').map(Number);
+          const dur = agAnterior.duracao_total || 30;
+          const fimMin = nh * 60 + nm + dur;
+          payload.horario = String(payload.horario).slice(0, 5);
+          payload.horario_fim = `${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`;
+        }
+
+        const { data: updatedAg, error } = await supabaseAdmin
+          .from('agendamento')
+          .update(payload)
           .eq('id', agendamento_id)
           .select()
           .single();
+
         if (error) throw error;
-        return { data: { success: true, agendamento: data } };
+
+        const mudouDataOuHora =
+          (payload.data && payload.data !== agAnterior.data) ||
+          (payload.horario && payload.horario !== agAnterior.horario);
+
+        if (mudouDataOuHora) {
+          try {
+            await supabaseAdmin
+              .from('horario_disponivel')
+              .update({ disponivel: true })
+              .eq('profissional_id', agAnterior.profissional_id)
+              .eq('data', agAnterior.data)
+              .eq('horario', agAnterior.horario);
+
+            await supabaseAdmin
+              .from('horario_disponivel')
+              .update({ disponivel: false })
+              .eq('profissional_id', updatedAg.profissional_id)
+              .eq('data', updatedAg.data)
+              .eq('horario', updatedAg.horario);
+          } catch (e) {}
+
+          if (updatedAg.status !== 'cancelado') {
+            await Promise.allSettled([
+              evolutionApi.sendAppointmentNotification('reagendamento', updatedAg)
+            ]);
+          }
+        } else if (action === 'status' && payload.status) {
+          if (payload.status === 'confirmado' && agAnterior.status !== 'confirmado') {
+            await Promise.allSettled([
+              evolutionApi.sendAppointmentNotification('confirmacao', updatedAg)
+            ]);
+          } else if (payload.status === 'cancelado' && agAnterior.status !== 'cancelado') {
+            try {
+              await supabaseAdmin
+                .from('horario_disponivel')
+                .update({ disponivel: true })
+                .eq('profissional_id', updatedAg.profissional_id)
+                .eq('data', updatedAg.data)
+                .eq('horario', updatedAg.horario);
+            } catch (e) {}
+            await Promise.allSettled([
+              evolutionApi.sendAppointmentNotification('cancelamento', updatedAg)
+            ]);
+          }
+        }
+
+        return { data: { success: true, agendamento: updatedAg } };
       }
 
       case 'syncUserCliente': {
@@ -1111,20 +1233,17 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         if (error) throw error;
 
-        // 3. Disparo de notificação de cancelamento WhatsApp para o cliente
+        // 3. Disparo de notificação de cancelamento WhatsApp para o cliente e barbeiro (com await)
         if (data) {
-          evolutionApi.sendAppointmentNotification('cancelamento', data).catch(err => {
-            console.warn('[WhatsApp] Aviso ao enviar cancelamento ao cliente:', err);
-          });
-
-          // Notificar também o barbeiro sobre o cancelamento
+          let profTel = null;
           if (data.profissional_id) {
-            supabaseAdmin.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle().then(({ data: prof }) => {
-              evolutionApi.notifyBarberCancellation(data, prof?.telefone).catch(err => {
-                console.warn('[WhatsApp] Aviso ao enviar cancelamento ao barbeiro:', err);
-              });
-            }).catch(() => {});
+            const { data: prof } = await supabaseAdmin.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle();
+            profTel = prof?.telefone || null;
           }
+          await Promise.allSettled([
+            evolutionApi.sendAppointmentNotification('cancelamento', data),
+            evolutionApi.notifyBarberCancellation(data, profTel)
+          ]);
         }
 
         return { data: { success: true, agendamento: data } };
@@ -1156,9 +1275,9 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         // 1. Se o barbeiro confirmou manualmente um agendamento (ex: estava 'pendente')
         if (targetStatus === 'confirmado' && agAnterior?.status !== 'confirmado') {
-          evolutionApi.sendAppointmentNotification('confirmacao', data).catch(err => {
-            console.warn('[WhatsApp] Aviso ao enviar confirmação manual ao cliente:', err);
-          });
+          await Promise.allSettled([
+            evolutionApi.sendAppointmentNotification('confirmacao', data)
+          ]);
         }
 
         // 2. Se o status mudou para 'cancelado' -> Liberar horário e avisar cliente e barbeiro
@@ -1173,17 +1292,16 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
             console.warn('[atualizarStatusAgendamento] Erro ao liberar slot:', e);
           }
 
-          evolutionApi.sendAppointmentNotification('cancelamento', data).catch(err => {
-            console.warn('[WhatsApp] Aviso ao enviar cancelamento ao cliente:', err);
-          });
-
+          let profTel = null;
           if (data.profissional_id) {
-            supabase.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle().then(({ data: prof }) => {
-              evolutionApi.notifyBarberCancellation(data, prof?.telefone).catch(err => {
-                console.warn('[WhatsApp] Aviso ao enviar cancelamento ao barbeiro:', err);
-              });
-            }).catch(() => {});
+            const { data: prof } = await supabase.from('profissional').select('telefone').eq('id', data.profissional_id).maybeSingle();
+            profTel = prof?.telefone || null;
           }
+
+          await Promise.allSettled([
+            evolutionApi.sendAppointmentNotification('cancelamento', data),
+            evolutionApi.notifyBarberCancellation(data, profTel)
+          ]);
         }
 
         return { data: { success: true, agendamento: data } };
@@ -1192,23 +1310,27 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
       case 'verificarClientePorTelefone': {
         const { telefone } = params;
         const rawTel = (telefone || '').replace(/\D/g, '');
-        let cliente = null;
+        let safeCliente = null;
 
         if (rawTel.length >= 8) {
           const { data } = await supabase
             .from('cliente')
             .select('*')
-            .or(`telefone.eq.${telefone},telefone.eq.${rawTel},telefone.ilike.%${rawTel.slice(-8)}%`)
+            .or(`telefone.eq.${rawTel},telefone.ilike.%${rawTel.slice(-8)}%`)
             .limit(1)
             .maybeSingle();
-          cliente = data;
+
+          if (data) {
+            const { senha_canal, ...publicCliente } = data;
+            safeCliente = publicCliente;
+          }
         }
 
         return {
           data: {
             success: true,
-            exists: !!cliente,
-            cliente: cliente || null
+            exists: !!safeCliente,
+            cliente: safeCliente
           }
         };
       }
@@ -1283,22 +1405,35 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           const horario = `${hh}:${mm}`;
 
           const isAlmoco = m >= almocoStartTotal && m < almocoEndTotal;
-          const ag = agendamentos.find(a => a.profissional_id === profissional_id && a.horario === horario);
-          const outroAg = !ag ? agendamentos.find(a => a.horario === horario) : null;
+          const agInicioExato = agendamentos.find(a => a.profissional_id === profissional_id && a.horario === horario);
+          const agOcupandoIntervalo = !agInicioExato
+            ? agendamentos.find(a => {
+                if (a.profissional_id !== profissional_id || !a.horario) return false;
+                const [agH, agM] = a.horario.split(':').map(Number);
+                const agIni = agH * 60 + agM;
+                const agFim = a.horario_fim
+                  ? (Number(a.horario_fim.split(':')[0]) * 60 + Number(a.horario_fim.split(':')[1]))
+                  : (agIni + (a.duracao_total || 30));
+                return m > agIni && m < agFim;
+              })
+            : null;
+          const outroAg = (!agInicioExato && !agOcupandoIntervalo)
+            ? agendamentos.find(a => a.horario === horario)
+            : null;
           const dbSlot = horariosDb.find(h => h.horario === horario);
 
           let disponivel = true;
-          if (dbSlot) {
-            disponivel = dbSlot.disponivel;
-          } else if (isAlmoco || ag) {
+          if (agInicioExato || agOcupandoIntervalo || isAlmoco) {
             disponivel = false;
+          } else if (dbSlot) {
+            disponivel = dbSlot.disponivel;
           }
 
           slots.push({
             horario,
             disponivel,
             isAlmoco,
-            agendamento: ag || outroAg || null
+            agendamento: agInicioExato || outroAg || null
           });
         }
 
@@ -1317,11 +1452,18 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           return { data: { success: false, error: 'Parâmetros incompletos para mover agendamento.' } };
         }
 
+        const horarioLimpo = String(novo_horario).trim().slice(0, 5);
+
         const { data: agAtual } = await supabase
           .from('agendamento')
           .select('*')
           .eq('id', agendamento_id)
           .maybeSingle();
+
+        const duracaoTotal = agAtual?.duracao_total || 30;
+        const [nh, nm] = horarioLimpo.split(':').map(Number);
+        const fimMin = nh * 60 + nm + duracaoTotal;
+        const novoHorarioFim = `${String(Math.floor(fimMin / 60)).padStart(2, '0')}:${String(fimMin % 60).padStart(2, '0')}`;
 
         if (agAtual) {
           await supabase
@@ -1336,8 +1478,8 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           .from('agendamento')
           .update({
             data: nova_data,
-            horario: novo_horario,
-            updated_date: new Date().toISOString()
+            horario: horarioLimpo,
+            horario_fim: novoHorarioFim
           })
           .eq('id', agendamento_id)
           .select()
@@ -1351,7 +1493,19 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
             .update({ disponivel: false })
             .eq('profissional_id', updatedAg.profissional_id)
             .eq('data', nova_data)
-            .eq('horario', novo_horario);
+            .eq('horario', horarioLimpo);
+
+          if (updatedAg.status !== 'cancelado') {
+            let profTel = null;
+            if (updatedAg.profissional_id) {
+              const { data: prof } = await supabase.from('profissional').select('telefone').eq('id', updatedAg.profissional_id).maybeSingle();
+              profTel = prof?.telefone || null;
+            }
+            await Promise.allSettled([
+              evolutionApi.sendAppointmentNotification('reagendamento', updatedAg),
+              evolutionApi.sendAppointmentNotification('aviso_barbeiro_reagendamento', updatedAg, { targetPhone: profTel || undefined })
+            ]);
+          }
         }
 
         return { data: { success: true, agendamento: updatedAg } };

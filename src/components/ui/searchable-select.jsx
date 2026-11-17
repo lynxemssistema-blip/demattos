@@ -83,8 +83,8 @@ export function SearchableSelect({
           <ChevronDown className="h-4 w-4 opacity-50 flex-shrink-0" />
         </button>
 
-        {/* Drawer mobile */}
-        <Drawer open={open} onOpenChange={(o) => { if (!o) { setOpen(false); setSearch(''); } }}>
+        {/* Drawer mobile (shouldScaleBackground=false evita conflito visual e pulo de tela no iOS dentro de Dialogs) */}
+        <Drawer shouldScaleBackground={false} open={open} onOpenChange={(o) => { if (!o) { setOpen(false); setSearch(''); } }}>
           <DrawerContent className="bg-[#1a1a1a] border-[#2a2a2a] max-h-[80vh]">
             <DrawerHeader>
               <DrawerTitle className="text-white text-center">Selecione uma opção</DrawerTitle>

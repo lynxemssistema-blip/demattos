@@ -15,6 +15,7 @@ import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { format } from 'date-fns';
 import { createSafariDate } from '@/lib/SafariCompat';
+import { parseBrazilDateTimeMs } from '@/lib/brazilTime';
 import { toast } from 'sonner';
 import DeMattosIA from '../components/canal/DeMattosIA';
 import AgendamentoRecorrente from '../components/canal/AgendamentoRecorrente';
@@ -362,16 +363,13 @@ function CanalClienteContent() {
       return false;
     }
 
-    const agora = new Date();
-    const dataHoraAgendamento = createSafariDate(`${agendamento.data}T${agendamento.horario}`);
-
-    // Verifica se a data é válida
-    if (isNaN(dataHoraAgendamento.getTime())) {
+    const tsAgendamento = parseBrazilDateTimeMs(agendamento.data, agendamento.horario);
+    if (isNaN(tsAgendamento)) {
       return false;
     }
 
-    // Verifica se o agendamento é futuro e tem pelo menos 90 minutos de antecedência
-    const diferencaEmMinutos = (dataHoraAgendamento - agora) / (1000 * 60);
+    // Verifica se o agendamento é futuro no horário de Brasília e tem pelo menos 90 minutos de antecedência
+    const diferencaEmMinutos = (tsAgendamento - Date.now()) / (1000 * 60);
     return diferencaEmMinutos >= 90;
   };
 

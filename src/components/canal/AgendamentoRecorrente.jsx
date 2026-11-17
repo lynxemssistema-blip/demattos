@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Repeat, AlertCircle, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { getBrazilNowParts } from '@/lib/brazilTime';
 
 export default function AgendamentoRecorrente({ cliente }) {
   const [profissionais, setProfissionais] = useState([]);
@@ -49,10 +50,10 @@ export default function AgendamentoRecorrente({ cliente }) {
 
   const calcularDatasRecorrentes = () => {
     const datas = [];
-    const hoje = new Date();
+    const { year, month, day } = getBrazilNowParts();
     const diaSelecionado = parseInt(formData.dia_semana);
     
-    let dataAtual = new Date(hoje);
+    let dataAtual = new Date(year, month - 1, day);
     
     // Avançar para o próximo dia da semana selecionado
     while (dataAtual.getDay() !== diaSelecionado) {

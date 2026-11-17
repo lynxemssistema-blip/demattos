@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import AdminRoute from '@/components/auth/AdminRoute';
 import { createPageUrl } from '@/utils';
-import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL } from '@/api/evolutionClient';
+import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL, sanitizeWhatsAppAvatarUrl } from '@/api/evolutionClient';
+import { getBrazilDateString, parseBrazilDateTimeMs } from '@/lib/brazilTime';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -73,6 +74,15 @@ function AdminWhatsAppContent() {
   const [loadingAction, setLoadingAction] = useState(false);
   const [countdown, setCountdown] = useState(40);
   const [previewSeed, setPreviewSeed] = useState(0);
+  const [brokenAvatars, setBrokenAvatars] = useState({});
+
+  const calcularDiasInativoBr = (ultimaData) => {
+    if (!ultimaData) return 9999;
+    const tsHoje = parseBrazilDateTimeMs(getBrazilDateString(), '12:00');
+    const tsUlt = parseBrazilDateTimeMs(ultimaData, '12:00');
+    if (isNaN(tsHoje) || isNaN(tsUlt)) return 0;
+    return Math.floor((tsHoje - tsUlt) / (1000 * 60 * 60 * 24));
+  };
 
   // Configurações & Templates com parâmetros de Automação e Anti-Ban
   const [settings, setSettings] = useState({
@@ -495,7 +505,7 @@ function AdminWhatsAppContent() {
         cliente_telefone: '(31) 98765-4321',
         barbeiro_nome: 'Luan',
         servico: 'Corte + Barba Visagista',
-        data: new Date().toLocaleDateString('pt-BR'),
+        data: getBrazilDateString(),
         horario: '15:30',
         endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem',
         telefone_barbearia: '(31) 97365-1924',
@@ -571,26 +581,16 @@ function AdminWhatsAppContent() {
       }];
     }
 
-    const now = new Date();
-
     if (marketingSegment === 'clientes_app_todos') {
       return clientesAppList;
     }
 
     if (marketingSegment === 'clientes_app_15') {
-      return clientesAppList.filter(cli => {
-        if (!cli.ultima_data) return true;
-        const diffDays = Math.floor((now - new Date(cli.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-        return diffDays >= 15;
-      });
+      return clientesAppList.filter(cli => calcularDiasInativoBr(cli.ultima_data) >= 15);
     }
 
     if (marketingSegment === 'clientes_app_30') {
-      return clientesAppList.filter(cli => {
-        if (!cli.ultima_data) return true;
-        const diffDays = Math.floor((now - new Date(cli.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-        return diffDays >= 30;
-      });
+      return clientesAppList.filter(cli => calcularDiasInativoBr(cli.ultima_data) >= 30);
     }
 
     if (marketingSegment === 'leads_agenda_30') {
@@ -801,7 +801,7 @@ function AdminWhatsAppContent() {
               id: Date.now() + Math.random(),
               cliente: client.nome,
               telefone: targetNumber,
-              hora: new Date().toLocaleTimeString('pt-BR'),
+              hora: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
               status: 'sucesso',
               detalhe: 'Enviado com sucesso'
             },
@@ -827,7 +827,7 @@ function AdminWhatsAppContent() {
               id: Date.now() + Math.random(),
               cliente: client.nome,
               telefone: targetNumber,
-              hora: new Date().toLocaleTimeString('pt-BR'),
+              hora: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
               status: 'erro',
               detalhe: res.error || res.reason || 'Falha no envio'
             },
@@ -1102,10 +1102,13 @@ function AdminWhatsAppContent() {
 
                 <CardContent className="pt-6 space-y-6">
                   <div className="flex flex-col sm:flex-row items-center gap-6 p-4 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a]">
-                    {instanceDetails?.profilePicUrl ? (
+                    {sanitizeWhatsAppAvatarUrl(instanceDetails?.profilePicUrl) && !brokenAvatars[instanceDetails.profilePicUrl] ? (
                       <img
-                        src={instanceDetails.profilePicUrl}
+                        src={sanitizeWhatsAppAvatarUrl(instanceDetails.profilePicUrl)}
                         alt="Perfil WhatsApp"
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        onError={() => setBrokenAvatars(prev => ({ ...prev, [instanceDetails.profilePicUrl]: true }))}
                         className="w-20 h-20 rounded-full object-cover border-2 border-[#25D366]"
                       />
                     ) : (
@@ -1976,11 +1979,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Inativos 15+ dias</p>
                           <p className="text-[11px] text-[#25D366] font-mono mt-0.5">
-                            {clientesAppList.filter(c => {
-                              if (!c.ultima_data) return true;
-                              const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-                              return d >= 15;
-                            }).length} clientes
+                            {clientesAppList.filter(c => calcularDiasInativoBr(c.ultima_data) >= 15).length} clientes
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Hora de renovar o corte</span>
                         </button>
@@ -1996,11 +1995,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Inativos 30+ dias</p>
                           <p className="text-[11px] text-amber-400 font-mono mt-0.5">
-                            {clientesAppList.filter(c => {
-                              if (!c.ultima_data) return true;
-                              const d = Math.floor((new Date() - new Date(c.ultima_data + 'T12:00:00Z')) / (1000 * 60 * 60 * 24));
-                              return d >= 30;
-                            }).length} clientes
+                            {clientesAppList.filter(c => calcularDiasInativoBr(c.ultima_data) >= 30).length} clientes
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Reconquista / Sumidos</span>
                         </button>
@@ -2401,14 +2396,16 @@ function AdminWhatsAppContent() {
                         >
                           {/* Coluna Esquerda: Avatar + Nome + Origem */}
                           <div className="flex items-center gap-3 min-w-0">
-                            {/* Avatar */}
+                            {/* Avatar (filtra URLs expiradas pps.whatsapp.net para zero erros 403 no console) */}
                             <div className="w-10 h-10 rounded-full bg-[#222] border border-[#333] overflow-hidden flex items-center justify-center shrink-0">
-                              {c.profilePicUrl ? (
+                              {sanitizeWhatsAppAvatarUrl(c.profilePicUrl) && !brokenAvatars[c.profilePicUrl] ? (
                                 <img
-                                  src={c.profilePicUrl}
+                                  src={sanitizeWhatsAppAvatarUrl(c.profilePicUrl)}
                                   alt={c.nome}
+                                  referrerPolicy="no-referrer"
+                                  loading="lazy"
                                   className="w-full h-full object-cover"
-                                  onError={(e) => { e.target.style.display = 'none'; }}
+                                  onError={() => setBrokenAvatars(prev => ({ ...prev, [c.profilePicUrl]: true }))}
                                 />
                               ) : (
                                 <span className={`text-xs font-bold ${c.tipo === 'cliente_app' ? 'text-emerald-400' : 'text-purple-400'}`}>

@@ -132,7 +132,14 @@ export function useAgendamento() {
       if (!mountedRef.current) return;
 
       if (response.data?.success) {
-        setHorariosDisponiveis(response.data.horarios || []);
+        const novosHorarios = response.data.horarios || [];
+        setHorariosDisponiveis(novosHorarios);
+        // Se o horário selecionado anteriormente não estiver mais disponível, limpar seleção
+        setFormData(prev => {
+          if (!prev.horario) return prev;
+          const aindaDisponivel = novosHorarios.some(h => h.horario === prev.horario);
+          return aindaDisponivel ? prev : { ...prev, horario: '' };
+        });
       } else {
         setHorariosDisponiveis([]);
       }
@@ -180,16 +187,7 @@ export function useAgendamento() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [formData.profissional_id, formData.data, carregarHorarios]);
 
-  // Auto-selecionar primeiro horário disponível
-  useEffect(() => {
-    if (!horariosDisponiveis || horariosDisponiveis.length === 0) return;
-    if (formData.horario && horariosDisponiveis.some(h => h.horario === formData.horario)) return;
-
-    setFormData(prev => ({
-      ...prev,
-      horario: horariosDisponiveis[0].horario
-    }));
-  }, [horariosDisponiveis]);
+  // O cliente sempre escolhe explicitamente o horário desejado (sem auto-selecionar o 1º horário livre silenciosamente)
 
   // Verificar cliente por telefone (apenas visitantes não logados)
   const verificarCliente = useCallback(async () => {
@@ -201,11 +199,11 @@ export function useAgendamento() {
         telefone: formData.phone
       });
 
-      if (response.data.success && response.data.cliente) {
+      if ((response.data?.success || response.data?.exists) && response.data?.cliente) {
         setClienteExistenteLocal(response.data.cliente);
         setFormData(prev => ({
           ...prev,
-          name: response.data.cliente.nome,
+          name: response.data.cliente.nome || prev.name,
           email: response.data.cliente.email || prev.email,
         }));
       } else {

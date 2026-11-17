@@ -1,41 +1,87 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Calendar, Clock, AlertCircle, Info, Loader2 } from 'lucide-react';
+import { Calendar, Clock, AlertCircle, Info, Loader2, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import SafeDateInput from '@/components/form/SafeDateInput';
 import SearchableSelect from '@/components/ui/searchable-select';
 import { isValidSafariDate } from '@/lib/SafariCompat';
+import { getBrazilDateString } from '@/lib/brazilTime';
 
 export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin, preSelectedData }) {
   const [clientes, setClientes] = useState([]);
+  const [modoNovoClienteAdmin, setModoNovoClienteAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [horariosDisponiveis, setHorariosDisponiveis] = useState([]);
   const queryClient = useQueryClient();
 
-  // Reutilizar cache home-data (se disponível), senão busca via getHomeData
-  const { data: homeData } = useQuery({
-    queryKey: ['home-data'],
+  // Queries dedicadas e resilientes (evitam depender das 11 queries simultâneas do getHomeData no mobile e nunca cacheiam lista vazia em falha de rede)
+  const { data: profissionaisData, isLoading: loadingProfissionais } = useQuery({
+    queryKey: ['agendamento-profissionais-ativos'],
     queryFn: async () => {
-      const response = await base44.functions.invoke('getHomeData', {});
-      return response.data?.success ? response.data : null;
+      const { data, error } = await supabase
+        .from('profissional')
+        .select('id, nome, foto_url, especialidades, ativo')
+        .eq('ativo', true)
+        .order('nome');
+      if (error) throw error;
+      return data || [];
     },
-    retry: 2,
-    retryDelay: 1500,
-    staleTime: 5 * 60 * 1000,
+    initialData: () => {
+      const cachedProfs = queryClient.getQueryData(['profissionais']);
+      if (Array.isArray(cachedProfs) && cachedProfs.length > 0) {
+        return cachedProfs.filter(p => p && p.id && p.ativo !== false);
+      }
+      const cachedHome = queryClient.getQueryData(['home-data']);
+      if (Array.isArray(cachedHome?.profissionais) && cachedHome.profissionais.length > 0) {
+        return cachedHome.profissionais.filter(p => p && p.id);
+      }
+      return undefined;
+    },
+    retry: 3,
+    retryDelay: 1000,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const { data: servicosData, isLoading: loadingServicos } = useQuery({
+    queryKey: ['agendamento-servicos-ativos'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('servico')
+        .select('id, nome, duracao, preco, ativo')
+        .eq('ativo', true)
+        .order('nome');
+      if (error) throw error;
+      return data || [];
+    },
+    initialData: () => {
+      const cachedServs = queryClient.getQueryData(['servicos']);
+      if (Array.isArray(cachedServs) && cachedServs.length > 0) {
+        return cachedServs.filter(s => s && s.id && s.ativo !== false);
+      }
+      const cachedHome = queryClient.getQueryData(['home-data']);
+      if (Array.isArray(cachedHome?.servicos) && cachedHome.servicos.length > 0) {
+        return cachedHome.servicos.filter(s => s && s.id);
+      }
+      return undefined;
+    },
+    retry: 3,
+    retryDelay: 1000,
+    staleTime: 2 * 60 * 1000,
   });
 
   const profissionais = useMemo(() => {
-    return (homeData?.profissionais || []).filter(p => p && p.id);
-  }, [homeData]);
+    return (profissionaisData || []).filter(p => p && p.id);
+  }, [profissionaisData]);
 
   const servicos = useMemo(() => {
-    return homeData?.servicos || [];
-  }, [homeData]);
+    return (servicosData || []).filter(s => s && s.id);
+  }, [servicosData]);
 
   const [formData, setFormData] = useState({
     cliente_id: '',
@@ -65,7 +111,7 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
     if (isAdmin) {
       loadClientes();
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (formData.profissional_id && formData.data) {
@@ -79,51 +125,50 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
     }
   }, [formData.horario, formData.servico_id]);
 
+  // Verificar cliente por telefone apenas quando digitando manualmente (visitante público ou Admin em modo Novo Cliente)
   useEffect(() => {
-    if (!clientePreenchido && !formData.cliente_id && formData.cliente_telefone && formData.cliente_telefone.length >= 10) {
+    if (clientePreenchido) return;
+    if (isAdmin && !modoNovoClienteAdmin) return;
+
+    const digitos = (formData.cliente_telefone || '').replace(/\D/g, '');
+    if (digitos.length >= 10) {
       const timeoutId = setTimeout(() => {
         verificarClienteExistente();
       }, 500);
       return () => clearTimeout(timeoutId);
-    } else if (!clientePreenchido && !formData.cliente_id && !isAdmin) {
+    } else {
       setClienteExistente(null);
     }
-  }, [formData.cliente_telefone, formData.cliente_id, clientePreenchido, isAdmin]);
+  }, [formData.cliente_telefone, clientePreenchido, isAdmin, modoNovoClienteAdmin]);
 
   const verificarClienteExistente = useCallback(async () => {
-    if (!formData.cliente_telefone || formData.cliente_telefone.length < 8) return;
     setVerificandoCliente(true);
     try {
       const response = await base44.functions.invoke('verificarClientePorTelefone', {
         telefone: formData.cliente_telefone
       });
-      
-      const foundClient = response.data?.cliente;
-      if (foundClient) {
-        setClienteExistente(foundClient);
+
+      if ((response.data?.success || response.data?.exists) && response.data?.cliente) {
+        setClienteExistente(response.data.cliente);
         setFormData(prev => ({
           ...prev,
-          cliente_id: prev.cliente_id || foundClient.id,
-          cliente_nome: prev.cliente_nome || foundClient.nome,
-          cliente_email: prev.cliente_email || foundClient.email || '',
+          cliente_nome: response.data.cliente.nome || prev.cliente_nome,
+          cliente_email: response.data.cliente.email || prev.cliente_email,
         }));
-      } else if (!isAdmin && !formData.cliente_id) {
+      } else {
         setClienteExistente(null);
       }
     } catch (error) {
-      if (!isAdmin && !formData.cliente_id) {
-        setClienteExistente(null);
-      }
+      setClienteExistente(null);
     } finally {
       setVerificandoCliente(false);
     }
-  }, [formData.cliente_telefone, isAdmin, formData.cliente_id]);
+  }, [formData.cliente_telefone]);
 
   const loadClientes = async () => {
     try {
-      // SEGURANÇA: Apenas admin pode listar clientes via function segura
       const response = await base44.functions.invoke('getAdminClientes', {});
-      setClientes(response.data.success ? response.data.clientes : []);
+      setClientes(response.data?.success ? response.data.clientes : []);
     } catch (error) {
       toast.error('Erro ao carregar clientes');
     }
@@ -134,73 +179,90 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
     if (cliente) {
       setFormData(prev => ({
         ...prev,
-        cliente_id: clienteId,
-        cliente_nome: cliente.nome,
-        cliente_telefone: cliente.telefone,
+        cliente_id: cliente.id,
+        cliente_nome: cliente.nome || '',
+        cliente_telefone: cliente.telefone || '',
         cliente_email: cliente.email || '',
       }));
       setClienteExistente(cliente);
     }
   };
 
-  const loadHorariosDisponiveis = useCallback(async () => {
-   if (!formData.profissional_id || !formData.data) {
-     return;
-   }
-
-   // ✅ CORREÇÃO #1: Validar data para Safari antes de enviar ao servidor
-   if (!isValidSafariDate(formData.data)) {
-     console.warn('Data inválida para Safari:', formData.data);
-     toast.error('Data inválida. Selecione novamente.');
-     setHorariosDisponiveis([]);
-     return;
-   }
-
-   setCarregandoHorarios(true);
-   try {
-     const response = await base44.functions.invoke('getHorariosDisponiveis', {
-       profissional_id: formData.profissional_id,
-       data: formData.data
-     });
-
-     if (response.data.success) {
-       // Normalizar: aceita tanto [{horario: "09:00"}] quanto ["09:00"]
-       const raw = response.data.horarios || [];
-       const normalized = raw.map(h => (typeof h === 'string' ? h : h.horario)).filter(Boolean).sort();
-       setHorariosDisponiveis(normalized);
-     } else {
-       setHorariosDisponiveis([]);
-     }
-   } catch (error) {
-     console.error('Erro ao carregar horários:', error);
-     toast.error('Erro ao carregar horários disponíveis');
-     setHorariosDisponiveis([]);
-   } finally {
-     setCarregandoHorarios(false);
-   }
-  }, [formData.profissional_id, formData.data]);
-
-  const getTodayLocal = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  const toggleModoClienteAdmin = () => {
+    setModoNovoClienteAdmin(prev => {
+      const novoModo = !prev;
+      setFormData(f => ({
+        ...f,
+        cliente_id: '',
+        cliente_nome: '',
+        cliente_telefone: '',
+        cliente_email: '',
+        cliente_senha: '',
+      }));
+      setClienteExistente(null);
+      return novoModo;
+    });
   };
 
+  const loadHorariosDisponiveis = useCallback(async () => {
+    if (!formData.profissional_id || !formData.data) {
+      return;
+    }
+
+    if (!isValidSafariDate(formData.data)) {
+      console.warn('Data inválida para Safari:', formData.data);
+      toast.error('Data inválida. Selecione novamente.');
+      setHorariosDisponiveis([]);
+      return;
+    }
+
+    setCarregandoHorarios(true);
+    try {
+      const response = await base44.functions.invoke('getHorariosDisponiveis', {
+        profissional_id: formData.profissional_id,
+        data: formData.data
+      });
+
+      if (response.data?.success) {
+        const raw = response.data.horarios || [];
+        const normalized = raw.map(h => (typeof h === 'string' ? h : h.horario)).filter(Boolean);
+        // No Admin, se abriu a partir de um slot específico na Agenda Diária (ex: encaixe imediato), garantir o slot na lista
+        if (
+          isAdmin &&
+          preSelectedData?.horario &&
+          preSelectedData?.data === formData.data &&
+          String(preSelectedData?.profissional_id) === String(formData.profissional_id) &&
+          !normalized.includes(preSelectedData.horario)
+        ) {
+          normalized.push(preSelectedData.horario);
+        }
+        normalized.sort();
+        setHorariosDisponiveis(normalized);
+      } else {
+        setHorariosDisponiveis([]);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar horários:', error);
+      toast.error('Erro ao carregar horários disponíveis');
+      setHorariosDisponiveis([]);
+    } finally {
+      setCarregandoHorarios(false);
+    }
+  }, [formData.profissional_id, formData.data, isAdmin, preSelectedData]);
+
   const analisarHorarioSelecionado = () => {
-    // Análise simplificada sem depender de agendamentosExistentes
     setAvisos({ sugestaoHorario: null, possivelAtraso: false });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validar campos obrigatórios com mensagens específicas
+    const telefoneDigitos = (formData.cliente_telefone || '').replace(/\D/g, '');
+
     const validacoes = [
-      { condicao: !formData.cliente_nome, mensagem: 'Nome do cliente é obrigatório' },
-      { condicao: !formData.cliente_telefone, mensagem: 'Telefone é obrigatório' },
-      { condicao: formData.cliente_telefone.length < 10, mensagem: 'Telefone inválido (mínimo 10 dígitos)' },
+      { condicao: !formData.cliente_nome?.trim(), mensagem: 'Nome do cliente é obrigatório' },
+      { condicao: !telefoneDigitos, mensagem: 'Telefone é obrigatório' },
+      { condicao: telefoneDigitos.length < 10, mensagem: 'Telefone inválido (mínimo 10 dígitos)' },
       { condicao: !formData.profissional_id, mensagem: 'Selecione um profissional' },
       { condicao: !formData.servico_id, mensagem: 'Selecione um serviço' },
       { condicao: !formData.data, mensagem: 'Selecione uma data' },
@@ -214,10 +276,9 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
       }
     }
 
-    // Se é novo cliente (no agendamento público), validar email e senha
-    // Administradores e agendamentos já preenchidos NUNCA são bloqueados por senha de canal
-    if (!isAdmin && !clientePreenchido && !clienteExistente) {
-      if (!formData.cliente_email) {
+    // Validação de email e senha do Canal APENAS para visitantes públicos novos (nunca bloquear o Admin)
+    if (!isAdmin && !clienteExistente) {
+      if (!formData.cliente_email?.trim()) {
         toast.error('Email é obrigatório para novos clientes');
         return;
       }
@@ -233,22 +294,18 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
         toast.error('A senha deve ter no mínimo 6 caracteres');
         return;
       }
+    } else if (formData.cliente_email?.trim() && !formData.cliente_email.includes('@')) {
+      toast.error('Email informado é inválido');
+      return;
     }
 
     setLoading(true);
 
     try {
-      const servicoSelecionado = servicos.find(s => s.id === formData.servico_id);
-      const profissionalSelecionado = profissionais.find(p => p.id === formData.profissional_id);
-
-      const rawTel = (formData.cliente_telefone || '').replace(/\D/g, '');
-      const clienteEmail = formData.cliente_email || (isAdmin ? `${rawTel}@cliente.demattos` : '');
-
-      // Preparar dados do formulário - garantir data em formato local
       const agendamentoData = {
-        name: formData.cliente_nome,
+        name: formData.cliente_nome.trim(),
         phone: formData.cliente_telefone,
-        email: clienteEmail,
+        email: (formData.cliente_email || '').trim(),
         profissional_id: formData.profissional_id,
         servicos_ids: [formData.servico_id],
         data: formData.data,
@@ -256,34 +313,37 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
         message: formData.observacoes,
         instagram: '',
         facebook: '',
-        senhaCanal: formData.cliente_senha || null
+        senhaCanal: formData.cliente_senha || '',
+        criadoPorAdmin: !!isAdmin,
       };
 
-      // Invalidar queries relacionadas após sucesso
       const response = await base44.functions.invoke('criarAgendamentoPublico', {
         formData: agendamentoData
       });
 
-      if (response.data.error) {
+      if (response.data?.error) {
         toast.error(response.data.error);
         setLoading(false);
         return;
       }
 
-      // Invalidar caches relacionados
       queryClient.invalidateQueries({ queryKey: ['agendamentos'] });
+      queryClient.invalidateQueries({ queryKey: ['agendaDiaria'] });
+      queryClient.invalidateQueries({ queryKey: ['clientes'] });
       queryClient.invalidateQueries({ queryKey: ['meus-agendamentos'] });
 
       toast.success('Agendamento criado com sucesso!');
-      
-      // Resetar formulário
+
       setFormData({
+        cliente_id: '',
         cliente_nome: '',
         cliente_telefone: '',
         cliente_email: '',
         cliente_senha: '',
         profissional_id: '',
+        profissional_nome: '',
         servico_id: '',
+        servico_nome: '',
         data: '',
         horario: '',
         observacoes: '',
@@ -311,25 +371,83 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {!clientePreenchido && isAdmin ? (
-            <div>
-              <label className="text-sm font-medium text-white mb-2 block">Cliente *</label>
-              <SearchableSelect
-                value={formData.cliente_id}
-                onValueChange={handleClienteSelect}
-                placeholder="Buscar cliente por nome ou telefone..."
-                items={clientes.map(c => ({
-                  id: c.id,
-                  value: c.id,
-                  label: `${c.nome} - ${c.telefone}`
-                }))}
-                displayKey="label"
-                searchKeys={['label']}
-                sortKey="label"
-              />
-              {formData.cliente_id && (
-                <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded p-3 mt-2 text-sm text-gray-400">
-                  <p>📞 {formData.cliente_telefone}</p>
-                  {formData.cliente_email && <p>📧 {formData.cliente_email}</p>}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-sm font-medium text-white">Cliente *</label>
+                <button
+                  type="button"
+                  onClick={toggleModoClienteAdmin}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[#D4AF37] hover:text-[#e5c453] transition-colors py-1 px-2 rounded border border-[#D4AF37]/30 bg-[#D4AF37]/10 touch-manipulation"
+                >
+                  {modoNovoClienteAdmin ? (
+                    <>
+                      <Users className="w-3.5 h-3.5" />
+                      Selecionar cliente cadastrado
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3.5 h-3.5" />
+                      + Novo cliente
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {!modoNovoClienteAdmin ? (
+                <>
+                  <SearchableSelect
+                    value={formData.cliente_id}
+                    onValueChange={handleClienteSelect}
+                    placeholder="Buscar cliente por nome ou telefone..."
+                    items={clientes.map(c => ({
+                      id: c.id,
+                      value: c.id,
+                      label: `${c.nome || 'Sem nome'} - ${c.telefone || ''}`
+                    }))}
+                    displayKey="label"
+                    searchKeys={['label']}
+                    sortKey="label"
+                  />
+                  {formData.cliente_id && (
+                    <div className="bg-[#0a0a0a] border border-[#2a2a2a] rounded p-3 mt-2 text-sm text-gray-400">
+                      <p>📞 {formData.cliente_telefone}</p>
+                      {formData.cliente_email && <p>📧 {formData.cliente_email}</p>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-3 bg-[#0a0a0a]/60 border border-[#2a2a2a] rounded-lg p-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-300 mb-1 block">Nome do Cliente *</label>
+                    <Input
+                      value={formData.cliente_nome}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cliente_nome: e.target.value }))}
+                      placeholder="Nome completo"
+                      className="bg-[#0a0a0a] border-[#2a2a2a] text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-300 mb-1 block">WhatsApp / Telefone *</label>
+                    <Input
+                      value={formData.cliente_telefone}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cliente_telefone: e.target.value }))}
+                      placeholder="(31) 99999-9999"
+                      className="bg-[#0a0a0a] border-[#2a2a2a] text-white"
+                    />
+                    {clienteExistente && (
+                      <p className="text-xs text-green-400 mt-1">✓ Cliente já cadastrado: {clienteExistente.nome}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-300 mb-1 block">E-mail (opcional)</label>
+                    <Input
+                      type="email"
+                      value={formData.cliente_email}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cliente_email: e.target.value }))}
+                      placeholder="cliente@email.com (opcional)"
+                      className="bg-[#0a0a0a] border-[#2a2a2a] text-white"
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -361,14 +479,14 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
                     <p className="text-xs text-green-400">✓ Cliente já cadastrado: {clienteExistente.nome}</p>
                   </div>
                 )}
-                {!clienteExistente && formData.cliente_telefone.length >= 10 && !verificandoCliente && (
+                {!clienteExistente && formData.cliente_telefone.replace(/\D/g, '').length >= 10 && !verificandoCliente && (
                   <div className="bg-blue-500/10 border border-blue-500/30 rounded p-2 mt-2">
                     <p className="text-xs text-blue-400">Novo cliente - Preencha email e crie uma senha</p>
                   </div>
                 )}
               </div>
 
-              {!clienteExistente && formData.cliente_telefone.length >= 10 && (
+              {!clienteExistente && formData.cliente_telefone.replace(/\D/g, '').length >= 10 && (
                 <>
                   <div>
                     <label className="text-sm font-medium text-white mb-2 block">Email *</label>
@@ -398,26 +516,25 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
           )}
 
           <div>
-             <label className="text-sm font-medium text-white mb-2 block">Profissional *</label>
-             <SearchableSelect
-               value={String(formData.profissional_id || '')}
-               onValueChange={(value) => {
-                 // ✅ CORREÇÃO #2: Interação segura com stop propagation
-                 const prof = profissionais.find(p => String(p.id) === String(value));
-                 setFormData(prev => ({ ...prev, profissional_id: value, profissional_nome: prof?.nome || '', horario: '' }));
-               }}
-               placeholder="Buscar profissional..."
-               items={profissionais.map(p => ({
-                 id: p.id,
-                 value: p.id,
-                 label: p.nome
-               }))}
-               displayKey="label"
-               searchKeys={['label']}
-               sortKey="label"
-               className="touch-manipulation"
-             />
-           </div>
+            <label className="text-sm font-medium text-white mb-2 block">Profissional *</label>
+            <SearchableSelect
+              value={String(formData.profissional_id || '')}
+              onValueChange={(value) => {
+                const prof = profissionais.find(p => String(p.id) === String(value));
+                setFormData(prev => ({ ...prev, profissional_id: value, profissional_nome: prof?.nome || '', horario: '' }));
+              }}
+              placeholder={loadingProfissionais ? 'Carregando profissionais...' : 'Buscar profissional...'}
+              items={profissionais.map(p => ({
+                id: p.id,
+                value: p.id,
+                label: p.nome
+              }))}
+              displayKey="label"
+              searchKeys={['label']}
+              sortKey="label"
+              className="touch-manipulation"
+            />
+          </div>
 
           <div>
             <label className="text-sm font-medium text-white mb-2 block">Serviço *</label>
@@ -427,11 +544,11 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
                 const serv = servicos.find(s => String(s.id) === String(value));
                 setFormData(prev => ({ ...prev, servico_id: value, servico_nome: serv?.nome || '' }));
               }}
-              placeholder="Buscar serviço..."
+              placeholder={loadingServicos ? 'Carregando serviços...' : 'Buscar serviço...'}
               items={servicos.map(s => ({
                 id: s.id,
                 value: s.id,
-                label: `${s.nome} - ${s.duracao}min - R$ ${s.preco.toFixed(2)}`
+                label: `${s.nome} - ${s.duracao || 30}min - R$ ${(Number(s.preco) || 0).toFixed(2)}`
               }))}
               displayKey="label"
               searchKeys={['label']}
@@ -445,7 +562,7 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
             <SafeDateInput
               value={formData.data}
               onChange={(e) => setFormData(prev => ({ ...prev, data: e.target.value, horario: '' }))}
-              min={getTodayLocal()}
+              min={getBrazilDateString()}
               className="bg-[#0a0a0a] border-[#2a2a2a] text-white"
             />
           </div>
@@ -459,7 +576,6 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
                   <span className="text-sm text-gray-400">Carregando horários...</span>
                 </div>
               ) : (
-                /* Select nativo — evita bug de race condition do drawer mobile no iOS */
                 <div className="relative">
                   <select
                     value={formData.horario || ''}
@@ -519,7 +635,7 @@ export default function AgendamentoForm({ onSuccess, clientePreenchido, isAdmin,
             className="w-full bg-[#D4AF37] hover:bg-[#B8973D] text-black font-semibold disabled:opacity-50 disabled:cursor-not-allowed py-3 md:py-2 touch-manipulation safe-area-bottom"
             style={{ WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}
           >
-            {loading ? 'Processando...' : 'Criar Agendamento'}
+            {loading ? 'Agendando...' : 'Criar Agendamento'}
           </Button>
         </form>
       </CardContent>

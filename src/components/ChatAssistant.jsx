@@ -557,11 +557,13 @@ Responda de forma natural e útil:`;
               throw new Error(`Horário inválido: "${horario}". Use formato HH:MM`);
             }
 
-            // Testar se a data é válida
-            const dataObj = new Date(`${data}T${horario}:00`);
-            if (isNaN(dataObj.getTime())) {
+            // Testar se a data é válida no fuso do Brasil
+            const [anoC, mesC, diaC] = data.split('-').map(Number);
+            const dataCheck = new Date(anoC, mesC - 1, diaC);
+            if (isNaN(dataCheck.getTime()) || dataCheck.getMonth() !== mesC - 1) {
               throw new Error('Data ou horário inválidos');
             }
+            const dataExibicaoBr = `${String(diaC).padStart(2, '0')}/${String(mesC).padStart(2, '0')}/${anoC}`;
 
             // Encontrar profissional (Luan como padrão)
             let profissional = profissionais.find(p => 
@@ -601,7 +603,7 @@ Responda de forma natural e útil:`;
               throw new Error(agendamentoResponse.data.error);
             }
             
-            respostaFinal = resposta.replace(/\[AGENDAR_CLIENTE\|[^\]]+\]/, `✅ Agendamento realizado com sucesso!\n\n📅 ${data} às ${horario}\n💈 ${servicoNome}\n👤 ${profissionalNome}\n\nVocê pode visualizar no seu Canal DeMattos.`);
+            respostaFinal = resposta.replace(/\[AGENDAR_CLIENTE\|[^\]]+\]/, `✅ Agendamento realizado com sucesso!\n\n📅 ${dataExibicaoBr} às ${horario}\n💈 ${servicoNome}\n👤 ${profissionalNome}\n\nVocê pode visualizar no seu Canal DeMattos.`);
           } catch (error) {
             respostaFinal = resposta.replace(/\[AGENDAR_CLIENTE\|[^\]]+\]/, `❌ Erro: ${error.message}`);
           }
