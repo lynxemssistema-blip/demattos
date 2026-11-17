@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import AdminRoute from '@/components/auth/AdminRoute';
 import { createPageUrl } from '@/utils';
-import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL, sanitizeWhatsAppAvatarUrl } from '@/api/evolutionClient';
+import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL, sanitizeWhatsAppAvatarUrl, ensureWhatsAppTrackingLink } from '@/api/evolutionClient';
 import { getBrazilDateString, parseBrazilDateTimeMs } from '@/lib/brazilTime';
+import { isBrazilianMaleContactName, extractCleanFirstName } from '@/lib/brazilianMaleNames';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -134,10 +135,13 @@ function AdminWhatsAppContent() {
 
   // Estados de Marketing & Campanhas
   const [marketingSegment, setMarketingSegment] = useState('clientes_app_15');
-  const [contactsFilterTab, setContactsFilterTab] = useState('todos'); // 'clientes_app', 'leads_agenda', 'todos'
+  const [contactsFilterTab, setContactsFilterTab] = useState('todos'); // 'clientes_app', 'leads_agenda', 'convertidos_link', 'enviados_24h', 'todos'
   const [contactsSearch, setContactsSearch] = useState('');
   const [clientesAppList, setClientesAppList] = useState([]);
   const [leadsAgendaList, setLeadsAgendaList] = useState([]);
+  const [historicoEnviosDb, setHistoricoEnviosDb] = useState([]);
+  const [enviados24hKeys, setEnviados24hKeys] = useState(new Set());
+  const [totalConvertidosLink, setTotalConvertidosLink] = useState(0);
   const [contactsVisibleLimit, setContactsVisibleLimit] = useState(60);
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [campaignRunning, setCampaignRunning] = useState(false);
@@ -192,15 +196,79 @@ function AdminWhatsAppContent() {
     }
   };
 
+  const registrarEnvioNoBanco = async ({ telefone, mensagem, tipo, status = 'enviado', clienteNome = '', segmento = '', isTeste = false, detalhe = '' }) => {
+    try {
+      const { data: inserted } = await supabaseAdmin
+        .from('conversa_whatsapp')
+        .insert({
+          telefone_cliente: String(telefone || '').replace(/\D/g, ''),
+          role: 'assistant',
+          mensagem: mensagem || `[${tipo}] ${detalhe}`,
+          dados_extraidos: {
+            tipo,
+            status,
+            segmento: segmento || undefined,
+            cliente_original: clienteNome || undefined,
+            is_teste: !!isTeste,
+            detalhe: detalhe || undefined
+          }
+        })
+        .select('id, telefone_cliente, mensagem, dados_extraidos, created_date')
+        .single();
+
+      if (inserted) {
+        setHistoricoEnviosDb(prev => [inserted, ...prev].slice(0, 150));
+        if (!isTeste) {
+          const rawKey = String(telefone || '').replace(/\D/g, '').slice(-8);
+          if (rawKey.length === 8) {
+            setEnviados24hKeys(prev => {
+              const next = new Set(prev);
+              next.add(rawKey);
+              return next;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Aviso ao registrar envio em conversa_whatsapp:', e);
+    }
+  };
+
   const loadClientesForMarketing = async () => {
     setLoadingClientes(true);
     try {
-      const [resCli, resAg, evoContacts] = await Promise.all([
-        supabaseAdmin.from('cliente').select('id, nome, telefone'),
+      const limite24hIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      const [resCli, resAg, evoContacts, resMsgs24h, resMsgsRecentes] = await Promise.all([
+        supabaseAdmin.from('cliente').select('id, nome, telefone, cadastrado_via_whatsapp, created_date'),
         supabaseAdmin.from('agendamento').select('cliente_nome, cliente_telefone, data').order('data', { ascending: false }),
-        evolutionApi.getContacts()
+        evolutionApi.getContacts(),
+        supabaseAdmin.from('conversa_whatsapp').select('telefone_cliente, dados_extraidos, created_date').gte('created_date', limite24hIso).order('created_date', { ascending: false }),
+        supabaseAdmin.from('conversa_whatsapp').select('id, telefone_cliente, mensagem, dados_extraidos, created_date').order('created_date', { ascending: false }).limit(120)
       ]);
 
+      setHistoricoEnviosDb(resMsgsRecentes.data || []);
+
+      // Mapa de números que JÁ receberam mensagem nas últimas 24 horas (bloqueio rigoroso de 24h)
+      const sent24hMap = new Map();
+      (resMsgs24h.data || []).forEach(m => {
+        const extra = m.dados_extraidos || {};
+        if (extra.modo_operacao === 'teste' || extra.is_teste === true) return;
+        const raw = (m.telefone_cliente || '').replace(/\D/g, '');
+        if (raw.length >= 8) {
+          const key = raw.slice(-8);
+          if (!sent24hMap.has(key)) {
+            sent24hMap.set(key, m.created_date);
+          }
+        }
+      });
+      setEnviados24hKeys(new Set(sent24hMap.keys()));
+
+      // Total geral de clientes convertidos pelo link do WhatsApp
+      const convertidosCount = (resCli.data || []).filter(c => c && c.cadastrado_via_whatsapp === true).length;
+      setTotalConvertidosLink(convertidosCount);
+
+      // appSet guarda TODOS os telefones já existentes no App (mesmo femininos) para nunca duplicar como lead
       const appSet = new Set();
       const appMap = new Map();
 
@@ -209,14 +277,21 @@ function AdminWhatsAppContent() {
         if (raw.length >= 8) {
           const key = raw.slice(-8);
           appSet.add(key);
-          appMap.set(key, {
-            id: c.id || key,
-            nome: (c.nome || 'Cliente').trim(),
-            telefone: raw,
-            ultima_data: null,
-            tipo: 'cliente_app',
-            origem: 'Cadastro do App'
-          });
+          const nomeLimpo = (c.nome || '').trim();
+          // Contagem e convite da Barbearia aplicam SOMENTE para nomes masculinos (ou quem já converteu pelo link se masculino)
+          if (isBrazilianMaleContactName(nomeLimpo)) {
+            appMap.set(key, {
+              id: c.id || key,
+              nome: nomeLimpo,
+              telefone: raw,
+              ultima_data: null,
+              tipo: 'cliente_app',
+              origem: c.cadastrado_via_whatsapp ? 'Link Convite WhatsApp' : 'Cadastro do App',
+              cadastradoViaWhatsApp: !!c.cadastrado_via_whatsapp,
+              enviado24h: sent24hMap.has(key),
+              ultimoEnvio24h: sent24hMap.get(key) || null
+            });
+          }
         }
       });
 
@@ -225,35 +300,50 @@ function AdminWhatsAppContent() {
         if (raw.length >= 8) {
           const key = raw.slice(-8);
           appSet.add(key);
-          const existing = appMap.get(key) || {
-            id: key,
-            nome: (a.cliente_nome || 'Cliente').trim(),
-            telefone: raw,
-            ultima_data: null,
-            tipo: 'cliente_app',
-            origem: 'Agendamento App'
-          };
-          if (!existing.ultima_data || (a.data && a.data > existing.ultima_data)) {
-            existing.ultima_data = a.data;
+          const nomeLimpo = (a.cliente_nome || '').trim();
+          const existing = appMap.get(key);
+          if (existing) {
+            if (!existing.ultima_data || (a.data && a.data > existing.ultima_data)) {
+              existing.ultima_data = a.data;
+            }
+            appMap.set(key, existing);
+          } else if (isBrazilianMaleContactName(nomeLimpo)) {
+            appMap.set(key, {
+              id: key,
+              nome: nomeLimpo,
+              telefone: raw,
+              ultima_data: a.data || null,
+              tipo: 'cliente_app',
+              origem: 'Agendamento App',
+              cadastradoViaWhatsApp: false,
+              enviado24h: sent24hMap.has(key),
+              ultimoEnvio24h: sent24hMap.get(key) || null
+            });
           }
-          appMap.set(key, existing);
         }
       });
 
       const leads = [];
+      const seenLeadKeys = new Set();
       (evoContacts || []).forEach(c => {
         const raw = (c.telefone || '').replace(/\D/g, '');
         if (raw.length >= 8) {
           const key = raw.slice(-8);
-          if (!appSet.has(key)) {
+          const nomeLimpo = (c.nome || '').trim();
+          // Somente nomes masculinos e sem duplicidade
+          if (!appSet.has(key) && !seenLeadKeys.has(key) && isBrazilianMaleContactName(nomeLimpo)) {
+            seenLeadKeys.add(key);
             leads.push({
               id: c.id || raw,
-              nome: (c.nome || 'Lead WhatsApp').trim(),
+              nome: nomeLimpo,
               telefone: raw,
               profilePicUrl: c.profilePicUrl || null,
               ultima_data: null,
               tipo: 'lead_agenda',
-              origem: 'Agenda Telefônica Evolution'
+              origem: 'Agenda Telefônica Evolution',
+              cadastradoViaWhatsApp: false,
+              enviado24h: sent24hMap.has(key),
+              ultimoEnvio24h: sent24hMap.get(key) || null
             });
           }
         }
@@ -521,7 +611,16 @@ function AdminWhatsAppContent() {
       if (settings.whatsapp_incluir_logo && settings[`whatsapp_logo_em_${tipo}`]) {
         mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
       }
-      const res = await evolutionApi.sendHumanizedTextMessage(targetNumber, text, settings, evolutionApi.getInstanceName(), { mediaUrl });
+      const res = await evolutionApi.sendHumanizedTextMessage(targetNumber, text, settings, evolutionApi.getInstanceName(), { mediaUrl, isImmediate: true });
+      await registrarEnvioNoBanco({
+        telefone: targetNumber,
+        mensagem: text,
+        tipo: `teste_${tipo}`,
+        status: res.success ? 'enviado' : 'erro',
+        clienteNome: 'Teste Manual',
+        isTeste: true,
+        detalhe: res.error || ''
+      });
       if (res.success) {
         toast.success(`Mensagem de teste enviada com sucesso para ${targetNumber}!`);
       } else {
@@ -558,6 +657,14 @@ function AdminWhatsAppContent() {
       );
 
       if (res.success) {
+        await registrarEnvioNoBanco({
+          telefone: targetNumber,
+          mensagem: caption,
+          tipo: 'teste_logo',
+          status: 'enviado',
+          clienteNome: 'Teste Logo',
+          isTeste: true
+        });
         toast.success(`Mensagem com a logo oficial enviada para ${targetNumber}!`);
         confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
       } else {
@@ -568,6 +675,12 @@ function AdminWhatsAppContent() {
     } finally {
       setSendingTest(false);
     }
+  };
+
+  const isElegivelForaJanela24h = (contato) => {
+    if (!contato) return false;
+    const key = String(contato.telefone || '').replace(/\D/g, '').slice(-8);
+    return !contato.enviado24h && !enviados24hKeys.has(key);
   };
 
   const getFilteredClients = () => {
@@ -581,45 +694,54 @@ function AdminWhatsAppContent() {
       }];
     }
 
+    // Bloqueio automático de qualquer número que já recebeu mensagem nas últimas 24 horas
+    const appDisponiveis = clientesAppList.filter(isElegivelForaJanela24h);
+    const leadsDisponiveis = leadsAgendaList.filter(isElegivelForaJanela24h);
+
     if (marketingSegment === 'clientes_app_todos') {
-      return clientesAppList;
+      return appDisponiveis;
     }
 
     if (marketingSegment === 'clientes_app_15') {
-      return clientesAppList.filter(cli => calcularDiasInativoBr(cli.ultima_data) >= 15);
+      return appDisponiveis.filter(cli => calcularDiasInativoBr(cli.ultima_data) >= 15);
     }
 
     if (marketingSegment === 'clientes_app_30') {
-      return clientesAppList.filter(cli => calcularDiasInativoBr(cli.ultima_data) >= 30);
+      return appDisponiveis.filter(cli => calcularDiasInativoBr(cli.ultima_data) >= 30);
     }
 
     if (marketingSegment === 'leads_agenda_30') {
-      return leadsAgendaList.slice(0, 30);
+      return leadsDisponiveis.slice(0, 30);
     }
 
     if (marketingSegment === 'leads_agenda_50') {
-      return leadsAgendaList.slice(0, 50);
+      return leadsDisponiveis.slice(0, 50);
     }
 
     if (marketingSegment === 'leads_agenda_todos') {
-      return leadsAgendaList;
+      return leadsDisponiveis;
     }
 
     if (marketingSegment === 'todos') {
-      return [...clientesAppList, ...leadsAgendaList];
+      return [...appDisponiveis, ...leadsDisponiveis];
     }
 
-    return clientesAppList;
+    return appDisponiveis;
   };
 
   const getFilteredContactsForExplorer = () => {
+    const todosConsolidados = [...clientesAppList, ...leadsAgendaList];
     let baseList = [];
     if (contactsFilterTab === 'clientes_app') {
       baseList = clientesAppList;
     } else if (contactsFilterTab === 'leads_agenda') {
       baseList = leadsAgendaList;
+    } else if (contactsFilterTab === 'convertidos_link') {
+      baseList = todosConsolidados.filter(c => c.cadastradoViaWhatsApp);
+    } else if (contactsFilterTab === 'enviados_24h') {
+      baseList = todosConsolidados.filter(c => !isElegivelForaJanela24h(c));
     } else {
-      baseList = [...clientesAppList, ...leadsAgendaList];
+      baseList = todosConsolidados;
     }
 
     if (!contactsSearch.trim()) return baseList;
@@ -704,6 +826,14 @@ function AdminWhatsAppContent() {
       );
 
       if (res.success) {
+        await registrarEnvioNoBanco({
+          telefone: targetNumber,
+          mensagem: formattedText,
+          tipo: 'teste_marketing',
+          status: 'enviado',
+          clienteNome: 'Teste Marketing',
+          isTeste: true
+        });
         toast.success(`Mensagem de marketing enviada com sucesso para ${targetNumber}!`);
         confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
       } else {
@@ -735,6 +865,24 @@ function AdminWhatsAppContent() {
 
     if (!window.confirm(confirmPrompt)) return;
 
+    // Checagem fresca no banco antes de iniciar lote para garantir trava absoluta de 24h
+    const liveBlockedKeys = new Set(enviados24hKeys);
+    if (!isTest) {
+      try {
+        const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: recentRows } = await supabaseAdmin
+          .from('conversa_whatsapp')
+          .select('telefone_cliente, dados_extraidos')
+          .gte('created_date', since24h);
+        (recentRows || []).forEach(r => {
+          const ex = r.dados_extraidos || {};
+          if (ex.modo_operacao === 'teste' || ex.is_teste === true) return;
+          const rk = String(r.telefone_cliente || '').replace(/\D/g, '').slice(-8);
+          if (rk.length === 8) liveBlockedKeys.add(rk);
+        });
+      } catch {}
+    }
+
     campaignStopRef.current = false;
     setCampaignRunning(true);
     setCampaignProgress({
@@ -753,6 +901,24 @@ function AdminWhatsAppContent() {
       }
 
       const client = targets[i];
+      const clientPhoneKey = String(client.telefone || '').replace(/\D/g, '').slice(-8);
+
+      // Dupla proteção 24h em tempo real dentro do loop
+      if (!isTest && clientPhoneKey.length === 8 && liveBlockedKeys.has(clientPhoneKey)) {
+        setCampaignLogs(prev => [
+          {
+            id: Date.now() + Math.random(),
+            cliente: client.nome,
+            telefone: client.telefone,
+            hora: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+            status: 'ignorado_24h',
+            detalhe: 'Já recebeu mensagem nas últimas 24h (bloqueado)'
+          },
+          ...prev
+        ]);
+        continue;
+      }
+
       setCampaignProgress(prev => ({
         ...prev,
         current: i + 1,
@@ -761,17 +927,19 @@ function AdminWhatsAppContent() {
 
       const sampleData = {
         cliente_nome: client.nome,
-        cliente_primeiro_nome: (client.nome || 'Cliente').split(' ')[0],
+        cliente_primeiro_nome: extractCleanFirstName(client.nome),
         cliente_telefone: client.telefone,
         barbeiro_nome: 'Luan',
         endereco: 'R. Rio Tocantins, 328 - Riacho das Pedras, Contagem',
         telefone_barbearia: '(31) 97365-1924'
       };
 
-      let formattedText = evolutionApi.formatTemplate(
-        settings.template_marketing,
-        sampleData,
-        settings.antiban_spintax_ativo
+      let formattedText = ensureWhatsAppTrackingLink(
+        evolutionApi.formatTemplate(
+          settings.template_marketing,
+          sampleData,
+          settings.antiban_spintax_ativo
+        )
       );
 
       if (isTest) {
@@ -784,6 +952,7 @@ function AdminWhatsAppContent() {
       }
 
       const targetNumber = isTest ? (settings.numero_teste_luan || LUAN_DEFAULT_PHONE) : client.telefone;
+      let shouldWaitAntiBan = true;
 
       try {
         const res = await evolutionApi.sendHumanizedTextMessage(
@@ -795,6 +964,9 @@ function AdminWhatsAppContent() {
         );
 
         if (res.success) {
+          if (!isTest && clientPhoneKey.length === 8) {
+            liveBlockedKeys.add(clientPhoneKey);
+          }
           setCampaignProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
           setCampaignLogs(prev => [
             {
@@ -808,20 +980,24 @@ function AdminWhatsAppContent() {
             ...prev
           ]);
 
-          try {
-            await supabaseAdmin.from('conversa_whatsapp').insert({
-              telefone_cliente: targetNumber,
-              role: 'assistant',
-              mensagem: formattedText,
-              dados_extraidos: {
-                tipo: 'campanha_marketing',
-                segmento: marketingSegment,
-                cliente_original: client.nome
-              }
-            });
-          } catch (eDb) {}
+          await registrarEnvioNoBanco({
+            telefone: targetNumber,
+            mensagem: formattedText,
+            tipo: 'campanha_marketing',
+            status: 'enviado',
+            clienteNome: client.nome,
+            segmento: marketingSegment,
+            isTeste: isTest
+          });
         } else {
+          if (res.invalidNumber) {
+            shouldWaitAntiBan = false; // Número sem WhatsApp não precisa aguardar intervalo de 25s
+            if (!isTest && clientPhoneKey.length === 8) {
+              liveBlockedKeys.add(clientPhoneKey);
+            }
+          }
           setCampaignProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
+          const motivoFalha = res.error || res.reason || 'Falha no envio';
           setCampaignLogs(prev => [
             {
               id: Date.now() + Math.random(),
@@ -829,17 +1005,28 @@ function AdminWhatsAppContent() {
               telefone: targetNumber,
               hora: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
               status: 'erro',
-              detalhe: res.error || res.reason || 'Falha no envio'
+              detalhe: motivoFalha
             },
             ...prev
           ]);
+
+          await registrarEnvioNoBanco({
+            telefone: targetNumber,
+            mensagem: formattedText,
+            tipo: 'campanha_marketing',
+            status: res.invalidNumber ? 'sem_whatsapp' : 'erro',
+            clienteNome: client.nome,
+            segmento: marketingSegment,
+            isTeste: isTest,
+            detalhe: motivoFalha
+          });
         }
       } catch (err) {
         setCampaignProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
       }
 
-      // Intervalo de segurança Anti-Ban
-      if (i < targets.length - 1 && !campaignStopRef.current) {
+      // Intervalo de segurança Anti-Ban (apenas quando houve tentativa real no WhatsApp)
+      if (shouldWaitAntiBan && i < targets.length - 1 && !campaignStopRef.current) {
         const delaySec = isTest ? 3 : Math.floor(Math.random() * 12) + 20; // 20s a 32s
         for (let cd = delaySec; cd > 0; cd--) {
           if (campaignStopRef.current) break;
@@ -1763,15 +1950,17 @@ function AdminWhatsAppContent() {
               </CardHeader>
             </Card>
 
-            {/* Resumo da Base: Clientes do App vs Leads da Agenda Evolution */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Resumo da Base Masculina: App vs Agenda Evolution + Proteção 24h + Conversões pelo Link */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-[#141414] border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
                 <div>
                   <p className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" /> Clientes do App
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" /> Clientes App (Masc.)
                   </p>
                   <p className="text-2xl font-black text-white font-mono mt-1">{clientesAppList.length}</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Cadastrados ou com agendamento</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    {clientesAppList.filter(isElegivelForaJanela24h).length} disponíveis agora
+                  </p>
                 </div>
                 <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl">
                   👥
@@ -1781,26 +1970,41 @@ function AdminWhatsAppContent() {
               <div className="bg-[#141414] border border-purple-500/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
                 <div>
                   <p className="text-xs font-semibold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-purple-400" /> Leads da Agenda Evolution
+                    <span className="w-2 h-2 rounded-full bg-purple-400" /> Leads Agenda (Masc.)
                   </p>
                   <p className="text-2xl font-black text-white font-mono mt-1">{leadsAgendaList.length}</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Contatos telefônicos (WhatsApp)</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    {leadsAgendaList.filter(isElegivelForaJanela24h).length} disponíveis p/ convite
+                  </p>
                 </div>
                 <div className="w-11 h-11 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 font-bold text-xl">
                   📱
                 </div>
               </div>
 
-              <div className="bg-[#141414] border border-[#D4AF37]/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
+              <div className="bg-[#141414] border border-amber-500/30 rounded-xl p-4 flex items-center justify-between shadow-lg">
                 <div>
-                  <p className="text-xs font-semibold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[#D4AF37]" /> Base Total de Contatos
+                  <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" /> Trava 24h Ativa
                   </p>
-                  <p className="text-2xl font-black text-white font-mono mt-1">{clientesAppList.length + leadsAgendaList.length}</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Público total sem duplicidade</p>
+                  <p className="text-2xl font-black text-white font-mono mt-1">{enviados24hKeys.size}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Números bloqueados por 24h</p>
                 </div>
-                <div className="w-11 h-11 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center text-[#D4AF37] font-bold text-xl">
-                  🌐
+                <div className="w-11 h-11 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-xl">
+                  ⏳
+                </div>
+              </div>
+
+              <div className="bg-[#141414] border border-[#25D366]/40 rounded-xl p-4 flex items-center justify-between shadow-lg">
+                <div>
+                  <p className="text-xs font-semibold text-[#25D366] uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#25D366]" /> Cadastros via Link
+                  </p>
+                  <p className="text-2xl font-black text-white font-mono mt-1">{totalConvertidosLink}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Convertidos pelo convite WhatsApp</p>
+                </div>
+                <div className="w-11 h-11 rounded-xl bg-[#25D366]/10 border border-[#25D366]/30 flex items-center justify-center text-[#25D366] font-bold text-xl">
+                  🎯
                 </div>
               </div>
             </div>
@@ -1889,7 +2093,7 @@ function AdminWhatsAppContent() {
                         { label: 'Saudação Período', tag: '{{saudacao_periodo}}' },
                         { label: '1º Nome Cliente', tag: '{{cliente_primeiro_nome}}' },
                         { label: 'Nome Completo', tag: '{{cliente_nome}}' },
-                        { label: 'Link do Site', tag: 'https://demattos.lynxems.com.br' },
+                        { label: 'Link Rastreável', tag: 'https://demattos.lynxems.com.br/?origem=whatsapp' },
                         { label: 'Telefone Barbearia', tag: '{{telefone_barbearia}}' }
                       ].map((item) => (
                         <button
@@ -1979,7 +2183,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Inativos 15+ dias</p>
                           <p className="text-[11px] text-[#25D366] font-mono mt-0.5">
-                            {clientesAppList.filter(c => calcularDiasInativoBr(c.ultima_data) >= 15).length} clientes
+                            {clientesAppList.filter(c => isElegivelForaJanela24h(c) && calcularDiasInativoBr(c.ultima_data) >= 15).length} elegíveis
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Hora de renovar o corte</span>
                         </button>
@@ -1995,7 +2199,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Inativos 30+ dias</p>
                           <p className="text-[11px] text-amber-400 font-mono mt-0.5">
-                            {clientesAppList.filter(c => calcularDiasInativoBr(c.ultima_data) >= 30).length} clientes
+                            {clientesAppList.filter(c => isElegivelForaJanela24h(c) && calcularDiasInativoBr(c.ultima_data) >= 30).length} elegíveis
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Reconquista / Sumidos</span>
                         </button>
@@ -2011,7 +2215,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Todos do App</p>
                           <p className="text-[11px] text-emerald-400 font-mono mt-0.5">
-                            {clientesAppList.length} clientes
+                            {clientesAppList.filter(isElegivelForaJanela24h).length} elegíveis
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Toda a base cadastrada</span>
                         </button>
@@ -2040,7 +2244,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Lote Seguro (30 Leads)</p>
                           <p className="text-[11px] text-purple-400 font-mono mt-0.5">
-                            {Math.min(30, leadsAgendaList.length)} leads
+                            {Math.min(30, leadsAgendaList.filter(isElegivelForaJanela24h).length)} leads
                           </p>
                           <span className="text-[10px] text-emerald-400 block mt-1">Recomendado Anti-Ban</span>
                         </button>
@@ -2056,7 +2260,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Lote Médio (50 Leads)</p>
                           <p className="text-[11px] text-purple-400 font-mono mt-0.5">
-                            {Math.min(50, leadsAgendaList.length)} leads
+                            {Math.min(50, leadsAgendaList.filter(isElegivelForaJanela24h).length)} leads
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Disparo intermediário</span>
                         </button>
@@ -2072,7 +2276,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Todos os Leads</p>
                           <p className="text-[11px] text-purple-400 font-mono mt-0.5">
-                            {leadsAgendaList.length} leads
+                            {leadsAgendaList.filter(isElegivelForaJanela24h).length} leads elegíveis
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">Toda a agenda do WhatsApp</span>
                         </button>
@@ -2093,7 +2297,7 @@ function AdminWhatsAppContent() {
                         >
                           <p className="text-xs font-bold">Toda a Base Consolidada</p>
                           <p className="text-[11px] text-blue-400 font-mono mt-0.5">
-                            {clientesAppList.length + leadsAgendaList.length} contatos únicos
+                            {clientesAppList.filter(isElegivelForaJanela24h).length + leadsAgendaList.filter(isElegivelForaJanela24h).length} contatos elegíveis
                           </p>
                           <span className="text-[10px] text-gray-400 block mt-1">App ({clientesAppList.length}) + Agenda ({leadsAgendaList.length})</span>
                         </button>
@@ -2348,7 +2552,29 @@ function AdminWhatsAppContent() {
                       }`}
                     >
                       <span className="w-2 h-2 rounded-full bg-purple-400" />
-                      Leads da Agenda ({leadsAgendaList.length})
+                      Leads Masculinos ({leadsAgendaList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setContactsFilterTab('convertidos_link'); setContactsVisibleLimit(60); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                        contactsFilterTab === 'convertidos_link'
+                          ? 'bg-[#25D366] text-black font-bold shadow'
+                          : 'text-[#25D366] hover:text-emerald-300'
+                      }`}
+                    >
+                      🎯 Convertidos Link ({[...clientesAppList, ...leadsAgendaList].filter(c => c.cadastradoViaWhatsApp).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setContactsFilterTab('enviados_24h'); setContactsVisibleLimit(60); }}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                        contactsFilterTab === 'enviados_24h'
+                          ? 'bg-amber-500 text-black font-bold shadow'
+                          : 'text-amber-400 hover:text-amber-300'
+                      }`}
+                    >
+                      ⏳ Bloqueados 24h ({[...clientesAppList, ...leadsAgendaList].filter(c => !isElegivelForaJanela24h(c)).length})
                     </button>
                   </div>
 
@@ -2426,7 +2652,17 @@ function AdminWhatsAppContent() {
                                   </Badge>
                                 ) : (
                                   <Badge className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[10px] px-1.5 py-0">
-                                    🟣 Lead Agenda Evolution
+                                    🟣 Lead Masculino Evolution
+                                  </Badge>
+                                )}
+                                {c.cadastradoViaWhatsApp && (
+                                  <Badge className="bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/50 text-[10px] px-1.5 py-0 font-bold">
+                                    🎯 Cadastrou pelo Link
+                                  </Badge>
+                                )}
+                                {!isElegivelForaJanela24h(c) && (
+                                  <Badge className="bg-amber-950/80 text-amber-300 border border-amber-700/60 text-[10px] px-1.5 py-0">
+                                    ⏳ Bloqueado 24h (Já enviado)
                                   </Badge>
                                 )}
                               </div>
@@ -2482,6 +2718,65 @@ function AdminWhatsAppContent() {
                         </Button>
                       )}
                     </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* 5. HISTÓRICO COMPLETO DE ENVIOS REGISTRADOS NO BANCO (conversa_whatsapp) */}
+            <Card className="bg-[#141414] border-[#222] shadow-xl">
+              <CardHeader className="pb-3 border-b border-[#222]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base text-white flex items-center gap-2">
+                      <CheckCheck className="w-5 h-5 text-[#25D366]" />
+                      Registro Oficial de Todos os Envios ({historicoEnviosDb.length} últimos registros)
+                    </CardTitle>
+                    <CardDescription className="text-xs text-gray-400 mt-0.5">
+                      Todos os disparos (convites, confirmações, reagendamentos, cancelamentos e testes) ficam gravados no banco e alimentam a trava automática de 24h.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {historicoEnviosDb.length === 0 ? (
+                  <div className="py-8 text-center text-gray-500 text-xs">
+                    Nenhum envio registrado ainda no banco de dados.
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto divide-y divide-[#222]">
+                    {historicoEnviosDb.map((item) => {
+                      const extra = item.dados_extraidos || {};
+                      const statusEnv = extra.status || 'enviado';
+                      const tipoEnv = extra.tipo || 'whatsapp';
+                      const nomeDest = extra.cliente_original || extra.cliente_nome || 'Destinatário';
+                      const dataHoraBr = item.created_date
+                        ? new Date(item.created_date).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+                        : '';
+                      return (
+                        <div key={item.id} className="p-3 sm:px-4 flex items-center justify-between gap-3 hover:bg-[#1a1a1e]">
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`w-2 h-2 rounded-full ${statusEnv === 'enviado' ? 'bg-[#25D366]' : 'bg-red-500'}`} />
+                              <span className="text-xs font-semibold text-white">{nomeDest}</span>
+                              <span className="text-xs font-mono text-gray-400">({formatPhoneNumber(item.telefone_cliente)})</span>
+                              <Badge className="bg-[#222] text-gray-300 border border-[#333] text-[10px] px-1.5 py-0">
+                                {tipoEnv}
+                              </Badge>
+                              {statusEnv === 'sem_whatsapp' && (
+                                <Badge className="bg-red-950/80 text-red-300 border border-red-700/60 text-[10px] px-1.5 py-0">
+                                  Sem WhatsApp ativo
+                                </Badge>
+                              )}
+                            </div>
+                            {extra.detalhe && (
+                              <p className="text-[11px] text-red-400 truncate max-w-xl">{extra.detalhe}</p>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-mono text-gray-400 shrink-0">{dataHoraBr}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>

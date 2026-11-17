@@ -418,9 +418,9 @@ function AdminClientesContent() {
                              </Badge>
                             )}
                             {cliente.cadastrado_via_whatsapp && (
-                             <Badge className="bg-green-500/10 text-green-400 border-green-500/30">
+                             <Badge className="bg-green-500/15 text-green-400 border-green-500/40 font-semibold">
                                <MessageCircle className="w-3 h-3 mr-1" />
-                               WhatsApp
+                               Cadastrou via Link WhatsApp
                              </Badge>
                             )}
                           </div>

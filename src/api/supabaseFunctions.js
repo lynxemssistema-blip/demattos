@@ -649,9 +649,21 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
 
         const confirmadoAuto = configConf ? (configConf.valor === 'true') : true;
 
-        // Upsert do cliente (sem sobrescrever email real existente caso não tenha sido informado)
+        // Upsert do cliente (sem sobrescrever email real existente e marcando cadastrado_via_whatsapp se veio pelo link/convite)
         try {
           const sufixoTel = telefoneNormalizado.slice(-8);
+          let veioPeloConviteWhats = !!formData.veioViaWhatsApp;
+
+          if (!veioPeloConviteWhats && sufixoTel.length >= 8) {
+            const { data: msgInvite } = await supabaseAdmin
+              .from('conversa_whatsapp')
+              .select('id')
+              .ilike('telefone_cliente', `%${sufixoTel}%`)
+              .limit(1)
+              .maybeSingle();
+            if (msgInvite) veioPeloConviteWhats = true;
+          }
+
           const orClauses = [`telefone.eq.${telefoneNormalizado}`, `telefone.ilike.%${sufixoTel}%`];
           if (emailInformado) {
             orClauses.push(`email.ilike.${emailInformado}`);
@@ -669,6 +681,9 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
             if (emailInformado) {
               payloadUpdate.email = emailInformado;
             }
+            if (veioPeloConviteWhats && !clienteExistente.cadastrado_via_whatsapp) {
+              payloadUpdate.cadastrado_via_whatsapp = true;
+            }
             await supabase.from('cliente').update(payloadUpdate).eq('id', clienteExistente.id);
           } else {
             await supabase.from('cliente').insert({
@@ -678,7 +693,8 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
               observacoes: message || '',
               tem_canal: !!senhaCanal,
               senha_canal: senhaCanal || null,
-              ai_credits: 0
+              ai_credits: 0,
+              cadastrado_via_whatsapp: veioPeloConviteWhats
             });
           }
         } catch (e) {

@@ -246,11 +246,22 @@ export function useAgendamento() {
     setLoading(true);
 
     try {
-      const response = await base44.functions.invoke('criarAgendamentoPublico', { formData });
+      let veioViaWhatsApp = false;
+      try {
+        veioViaWhatsApp = window.localStorage.getItem('demattos_origem_whatsapp') === 'true';
+      } catch {}
+
+      const response = await base44.functions.invoke('criarAgendamentoPublico', {
+        formData: { ...formData, veioViaWhatsApp }
+      });
 
       if (response?.data?.error) {
         toast.error(response.data.error);
         return;
+      }
+
+      if (veioViaWhatsApp) {
+        try { window.localStorage.removeItem('demattos_origem_whatsapp'); } catch {}
       }
 
       setSubmitted(true);

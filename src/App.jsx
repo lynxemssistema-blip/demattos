@@ -28,6 +28,20 @@ const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
   const location = useLocation();
 
+  // Capturar automaticamente entrada via link de convite do WhatsApp (?origem=whatsapp, ?ref=whatsapp, ?utm_source=whatsapp)
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(location.search);
+      const origem = (params.get('origem') || params.get('ref') || params.get('utm_source') || '').toLowerCase();
+      if (origem.includes('whatsapp') || origem.includes('convite')) {
+        window.localStorage.setItem('demattos_origem_whatsapp', 'true');
+        window.localStorage.setItem('demattos_origem_whatsapp_ts', String(Date.now()));
+      }
+    } catch {
+      // Ignorar modo privado Safari
+    }
+  }, [location.search]);
+
   // Só bloqueia se houver erro que exige ação imediata (login obrigatório / usuário não registrado)
   // Não bloqueia por loading — a Home renderiza imediatamente
   if (!isLoadingPublicSettings && !isLoadingAuth && authError) {

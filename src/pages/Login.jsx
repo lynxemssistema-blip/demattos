@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -108,16 +108,40 @@ export default function Login() {
 
       if (error) throw error;
 
-      // Cria ou atualiza o registro na tabela cliente
-      const { error: clienteErr } = await supabase.from('cliente').upsert({
+      // Verificar se o cliente veio pelo link de convite do WhatsApp ou se já recebeu convite em conversa_whatsapp
+      const rawTel = (telefone || '').replace(/\D/g, '');
+      let veioDoWhatsApp = false;
+      try {
+        if (window.localStorage.getItem('demattos_origem_whatsapp') === 'true') {
+          veioDoWhatsApp = true;
+        } else if (rawTel.length >= 8) {
+          const { data: convMsg } = await supabaseAdmin
+            .from('conversa_whatsapp')
+            .select('id')
+            .ilike('telefone_cliente', `%${rawTel.slice(-8)}%`)
+            .limit(1)
+            .maybeSingle();
+          if (convMsg) veioDoWhatsApp = true;
+        }
+      } catch {
+        // Segue normalmente
+      }
+
+      // Cria ou atualiza o registro na tabela cliente marcando cadastrado_via_whatsapp quando originado do convite
+      const payloadCliente = {
         nome: nome.trim(),
         email: cleanEmail,
-        telefone: telefone.trim() || '',
-        tem_canal: true
-      }, { onConflict: 'email' });
+        telefone: rawTel || telefone.trim() || '',
+        tem_canal: true,
+        ...(veioDoWhatsApp ? { cadastrado_via_whatsapp: true } : {})
+      };
+
+      const { error: clienteErr } = await supabase.from('cliente').upsert(payloadCliente, { onConflict: 'email' });
 
       if (clienteErr) {
         console.warn('Registro de cliente criado com aviso:', clienteErr.message);
+      } else if (veioDoWhatsApp) {
+        try { window.localStorage.removeItem('demattos_origem_whatsapp'); } catch {}
       }
 
       toast.success('Conta criada com sucesso!');

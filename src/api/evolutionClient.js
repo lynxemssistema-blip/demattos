@@ -1,5 +1,21 @@
 import { supabase, supabaseAdmin } from '@/lib/supabaseClient';
 import { getBrazilHour, getBrazilMinutesNow, getBrazilNowParts } from '@/lib/brazilTime';
+import { extractCleanFirstName } from '@/lib/brazilianMaleNames';
+
+// Cache em memória de números já validados na Evolution API (evita repetir chamadas /chat/whatsappNumbers)
+const resolvedWhatsAppJidCache = new Map();
+
+/**
+ * Garante que o link do site em mensagens de convite/marketing leve o parâmetro ?origem=whatsapp
+ * para marcar automaticamente os clientes que se cadastrarem ou agendarem pelo link.
+ */
+export function ensureWhatsAppTrackingLink(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text.replace(
+    /https:\/\/demattos\.lynxems\.com\.br(\/?)(?!\?[a-zA-Z0-9_=&-]*origem=whatsapp)(?=\s|$)/gi,
+    'https://demattos.lynxems.com.br/?origem=whatsapp'
+  );
+}
 
 const DEFAULT_API_URL = import.meta.env.VITE_EVOLUTION_API_URL || 'https://evo.lynxems.com.br';
 const DEFAULT_API_KEY = import.meta.env.VITE_EVOLUTION_API_KEY || 'F10230BCFE78-4B5A-80F3-789AD4E58B79';
@@ -153,7 +169,7 @@ Aqui na *Barbearia DeMattos*, nosso compromisso é valorizar a sua melhor versã
 ✂️ {Que tal renovar seu estilo para os próximos dias?|Está na hora de dar aquele trato no visual?|Seu estilo e bem-estar merecem esse cuidado.}
 
 📲 *Agende seu próximo horário com facilidade pelo nosso site:*
-👉 https://demattos.lynxems.com.br
+👉 https://demattos.lynxems.com.br/?origem=whatsapp
 
 _Te esperamos para um café especial e um atendimento diferenciado!_ ☕💈`
 };
@@ -331,6 +347,57 @@ export const evolutionApi = {
   },
 
   /**
+   * Valida silenciosamente (HTTP 200) se o telefone possui conta ativa no WhatsApp e resolve o JID exato
+   * (com ou sem o 9º dígito em DDDs brasileiros como MG 31..38), evitando 100% dos erros 400 Bad Request no console.
+   */
+  async resolveValidWhatsAppNumber(number, instanceName = this.getInstanceName()) {
+    let cleanNumber = (number || '').toString().replace(/\D/g, '');
+    if (!cleanNumber || cleanNumber.length < 8) {
+      return { valid: false, number: null, error: 'Número de telefone inválido' };
+    }
+    if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
+      cleanNumber = `55${cleanNumber}`;
+    }
+
+    const cacheKey = `${instanceName}:${cleanNumber}`;
+    if (resolvedWhatsAppJidCache.has(cacheKey)) {
+      return resolvedWhatsAppJidCache.get(cacheKey);
+    }
+
+    const candidates = [cleanNumber];
+    // Testar também variante com/sem 9º dígito para celulares brasileiros (55 + DDD + 9 + 8 dígitos <-> 55 + DDD + 8 dígitos)
+    if (cleanNumber.startsWith('55') && cleanNumber.length === 13 && cleanNumber[4] === '9') {
+      candidates.push(cleanNumber.slice(0, 4) + cleanNumber.slice(5));
+    } else if (cleanNumber.startsWith('55') && cleanNumber.length === 12) {
+      candidates.push(cleanNumber.slice(0, 4) + '9' + cleanNumber.slice(4));
+    }
+
+    try {
+      const res = await this.request(`/chat/whatsappNumbers/${instanceName}`, {
+        method: 'POST',
+        body: JSON.stringify({ numbers: candidates })
+      });
+
+      if (res.ok && Array.isArray(res.data)) {
+        const match = res.data.find(item => item && item.exists === true && item.jid);
+        if (match) {
+          const resolvedNum = String(match.jid).split('@')[0].replace(/\D/g, '') || cleanNumber;
+          const result = { valid: true, number: resolvedNum, jid: match.jid };
+          resolvedWhatsAppJidCache.set(cacheKey, result);
+          return result;
+        }
+        const notFound = { valid: false, number: cleanNumber, error: 'Número não possui WhatsApp ativo' };
+        resolvedWhatsAppJidCache.set(cacheKey, notFound);
+        return notFound;
+      }
+    } catch (e) {
+      // Se o endpoint de checagem oscilar, permitir tentativa direta com o número normalizado
+    }
+
+    return { valid: true, number: cleanNumber };
+  },
+
+  /**
    * Envia presença no WhatsApp (ex: 'composing' para simular "digitando...", 'paused' para parar)
    * Essencial para a Meta registrar atividade humana antes do disparo de mensagens automáticas.
    */
@@ -377,7 +444,8 @@ export const evolutionApi = {
 
       return {
         success: res.ok,
-        data: res.data
+        data: res.data,
+        error: res.ok ? null : (res.data?.error || `HTTP ${res.status}`)
       };
     } catch (error) {
       return {
@@ -413,7 +481,8 @@ export const evolutionApi = {
 
       return {
         success: res.ok,
-        data: res.data
+        data: res.data,
+        error: res.ok ? null : (res.data?.error || `HTTP ${res.status}`)
       };
     } catch (error) {
       return {
@@ -433,6 +502,22 @@ export const evolutionApi = {
   async sendHumanizedTextMessage(number, text, settingsOverride = null, instanceName = this.getInstanceName(), options = {}) {
     try {
       const settings = settingsOverride || await this.getWhatsAppSettings();
+
+      // 0. Validar previamente se o número possui WhatsApp ativo (elimina 100% dos erros 400 Bad Request em sendPresence/sendMedia/sendText)
+      const checkRes = await this.resolveValidWhatsAppNumber(number, instanceName);
+      if (!checkRes.valid || !checkRes.number) {
+        return {
+          success: false,
+          invalidNumber: true,
+          skipped: true,
+          error: checkRes.error || 'Número não possui WhatsApp ativo'
+        };
+      }
+      const resolvedNumber = checkRes.number;
+
+      const finalMessageText = options.tipo === 'campanha_marketing'
+        ? ensureWhatsAppTrackingLink(text)
+        : text;
 
       // 1. Verificação da Janela de Silêncio Noturno (Anti-Denúncia)
       // Mensagens transacionais imediatas (confirmação que o cliente acabou de fazer, cancelamento, aviso ao barbeiro)
@@ -469,7 +554,7 @@ export const evolutionApi = {
       if (settings.antiban_simular_digitando) {
         try {
           const presenceMs = isTransactionalImmediate ? 900 : 2000;
-          await this.sendPresence(number, 'composing', presenceMs, instanceName);
+          await this.sendPresence(resolvedNumber, 'composing', presenceMs, instanceName);
           const typingWait = isTransactionalImmediate
             ? 800
             : (Math.floor(Math.random() * 1200) + 1800);
@@ -493,9 +578,9 @@ export const evolutionApi = {
       if (options.mediaUrl) {
         try {
           const mediaRes = await this.sendMediaMessage(
-            number,
+            resolvedNumber,
             options.mediaUrl,
-            text,
+            finalMessageText,
             options.mimetype || 'image/jpeg',
             options.fileName || 'logo_demattos.jpg',
             instanceName
@@ -509,10 +594,10 @@ export const evolutionApi = {
         }
       }
 
-      return await this.sendTextMessage(number, text, instanceName);
+      return await this.sendTextMessage(resolvedNumber, finalMessageText, instanceName);
     } catch (error) {
-      console.error('[Anti-Ban] Erro no envio humanizado, usando envio padrão:', error);
-      return await this.sendTextMessage(number, text, instanceName);
+      console.error('[Anti-Ban] Erro no envio humanizado:', error);
+      return { success: false, error: error.message };
     }
   },
 
@@ -521,7 +606,7 @@ export const evolutionApi = {
    */
   formatTemplate(template, data = {}, applySpintax = true) {
     if (!template) return '';
-    const primeiroNome = (data.cliente_nome || 'Cliente').trim().split(' ')[0];
+    const primeiroNome = extractCleanFirstName(data.cliente_primeiro_nome || data.cliente_nome || 'Amigo');
     const saudacao = getSaudacaoPeriodo();
 
     const rawDate = String(data.data || '').trim().split('T')[0];
