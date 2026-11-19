@@ -625,15 +625,15 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           .eq('data', data)
           .in('status', ['pendente', 'confirmado']);
 
+        // Bloqueia apenas se o próprio horário de início escolhido já estiver ocupado por outro atendimento;
+        // permite agendar mesmo que a duração do serviço ultrapasse o início de um atendimento posterior (ex: 15:30 com 45 min havendo agenda às 16:00).
         const conflitoProfissional = (agExistentes || []).some(ag => {
           const [agH, agM] = ag.horario.split(':').map(Number);
           const agInicio = agH * 60 + agM;
           const agFim = ag.horario_fim
             ? (Number(ag.horario_fim.split(':')[0]) * 60 + Number(ag.horario_fim.split(':')[1]))
             : (agInicio + (ag.duracao_total || 30));
-          return (inicioMinutos >= agInicio && inicioMinutos < agFim) ||
-                 (fimMinutos > agInicio && fimMinutos <= agFim) ||
-                 (inicioMinutos <= agInicio && fimMinutos >= agFim);
+          return inicioMinutos >= agInicio && inicioMinutos < agFim;
         });
 
         if (conflitoProfissional) {
@@ -655,13 +655,14 @@ export async function invokeSupabaseFunction(functionName, params = {}) {
           let veioPeloConviteWhats = !!formData.veioViaWhatsApp;
 
           if (!veioPeloConviteWhats && sufixoTel.length >= 8) {
-            const { data: msgInvite } = await supabaseAdmin
+            const { data: msgsInvite } = await supabaseAdmin
               .from('conversa_whatsapp')
-              .select('id')
+              .select('id, dados_extraidos')
               .ilike('telefone_cliente', `%${sufixoTel}%`)
-              .limit(1)
-              .maybeSingle();
-            if (msgInvite) veioPeloConviteWhats = true;
+              .limit(10);
+            if ((msgsInvite || []).some(r => !r.dados_extraidos?.status || r.dados_extraidos.status === 'enviado')) {
+              veioPeloConviteWhats = true;
+            }
           }
 
           const orClauses = [`telefone.eq.${telefoneNormalizado}`, `telefone.ilike.%${sufixoTel}%`];

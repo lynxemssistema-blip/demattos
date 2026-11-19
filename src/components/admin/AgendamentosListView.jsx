@@ -145,8 +145,12 @@ export default function AgendamentosListView({
         queryClient.invalidateQueries(['agendamentos']);
         setWhatsappModalOpen(false);
         setExpandedWhatsapp(prev => ({ ...prev, [selectedAgendamento.id]: true }));
+      } else if (res.data?.res?.disconnected) {
+        toast.warning('WhatsApp desconectado. Envio desconsiderado.');
+      } else if (res.data?.res?.invalidNumber || res.data?.res?.skipped) {
+        toast.info('Envio desconsiderado: ' + (res.data?.res?.error || res.data?.res?.reason || 'usuário sem telefone válido ou sem WhatsApp ativo'));
       } else {
-        toast.error('Erro no envio: ' + (res.data?.error || res.data?.res?.reason || 'Falha no disparo'));
+        toast.error('Erro no envio: ' + (res.data?.error || res.data?.res?.error || res.data?.res?.reason || 'Falha no disparo'));
       }
     } catch (e) {
       toast.error('Erro ao enviar: ' + e.message);

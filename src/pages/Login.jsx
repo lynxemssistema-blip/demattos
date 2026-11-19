@@ -115,13 +115,14 @@ export default function Login() {
         if (window.localStorage.getItem('demattos_origem_whatsapp') === 'true') {
           veioDoWhatsApp = true;
         } else if (rawTel.length >= 8) {
-          const { data: convMsg } = await supabaseAdmin
+          const { data: convMsgs } = await supabaseAdmin
             .from('conversa_whatsapp')
-            .select('id')
+            .select('id, dados_extraidos')
             .ilike('telefone_cliente', `%${rawTel.slice(-8)}%`)
-            .limit(1)
-            .maybeSingle();
-          if (convMsg) veioDoWhatsApp = true;
+            .limit(10);
+          if ((convMsgs || []).some(r => !r.dados_extraidos?.status || r.dados_extraidos.status === 'enviado')) {
+            veioDoWhatsApp = true;
+          }
         }
       } catch {
         // Segue normalmente

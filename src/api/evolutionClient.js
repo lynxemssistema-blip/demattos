@@ -5,6 +5,97 @@ import { extractCleanFirstName } from '@/lib/brazilianMaleNames';
 // Cache em memória de números já validados na Evolution API (evita repetir chamadas /chat/whatsappNumbers)
 const resolvedWhatsAppJidCache = new Map();
 
+// Cache em memória do estado da conexão por instância para evitar chamadas repetidas quando desconectada
+const connectionStateCache = new Map();
+
+const VALID_BR_DDDS = new Set([
+  '11', '12', '13', '14', '15', '16', '17', '18', '19',
+  '21', '22', '24', '27', '28',
+  '31', '32', '33', '34', '35', '37', '38',
+  '41', '42', '43', '44', '45', '46', '47', '48', '49',
+  '51', '53', '54', '55',
+  '61', '62', '63', '64', '65', '66', '67', '68', '69',
+  '71', '73', '74', '75', '77', '79',
+  '81', '82', '83', '84', '85', '86', '87', '88', '89',
+  '91', '92', '93', '94', '95', '96', '97', '98', '99'
+]);
+
+function isDisconnectedApiResponse(res) {
+  if (!res) return false;
+  if (res.status === 428 || res.status === 401) return true;
+  const outputStatus = res?.data?.output?.statusCode;
+  if (outputStatus === 428 || outputStatus === 401) return true;
+  try {
+    const serialized = JSON.stringify(res.data || {});
+    return /connection\s*closed|device_removed|not\s*connected|instance.*not\s*connected|stream\s*errored/i.test(serialized);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normaliza e valida um número de telefone antes de qualquer chamada à Evolution API.
+ * Quando `hasCountryCodeHint` é verdadeiro (ex: JID sincronizado da agenda Evolution),
+ * números internacionais com DDI diferente de 55 são preservados sem prefixar `55`.
+ */
+export function normalizeAndValidatePhone(number, { hasCountryCodeHint = false } = {}) {
+  const invalid = {
+    valid: false,
+    number: null,
+    isBrazil: false,
+    reason: 'invalid_phone',
+    error: 'Número de telefone inválido'
+  };
+
+  const digits = String(number || '').replace(/\D/g, '').replace(/^0+/, '');
+  if (!digits || digits.length < 10 || digits.length > 15) {
+    return invalid;
+  }
+
+  if (/^(\d)\1+$/.test(digits) || /^(\d)\1{7,}$/.test(digits.slice(-8))) {
+    return invalid;
+  }
+
+  const isValidBrWithDdi = (num) => {
+    if (!num.startsWith('55') || (num.length !== 12 && num.length !== 13)) return false;
+    if (!VALID_BR_DDDS.has(num.slice(2, 4))) return false;
+    if (num.length === 13 && num[4] !== '9') return false;
+    if (num.length === 12 && !/^[2-9]$/.test(num[4])) return false;
+    return true;
+  };
+
+  if (hasCountryCodeHint) {
+    if (digits.startsWith('55')) {
+      return isValidBrWithDdi(digits) ? { valid: true, number: digits, isBrazil: true } : invalid;
+    }
+    return { valid: true, number: digits, isBrazil: false };
+  }
+
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    return isValidBrWithDdi(digits) ? { valid: true, number: digits, isBrazil: true } : invalid;
+  }
+
+  if (digits.length === 11) {
+    if (VALID_BR_DDDS.has(digits.slice(0, 2)) && digits[2] === '9') {
+      return { valid: true, number: `55${digits}`, isBrazil: true };
+    }
+    return invalid;
+  }
+
+  if (digits.length === 10) {
+    if (VALID_BR_DDDS.has(digits.slice(0, 2)) && /^[2-9]$/.test(digits[2])) {
+      return { valid: true, number: `55${digits}`, isBrazil: true };
+    }
+    return invalid;
+  }
+
+  if (digits.length >= 12 && digits.length <= 15 && !digits.startsWith('55')) {
+    return { valid: true, number: digits, isBrazil: false };
+  }
+
+  return invalid;
+}
+
 /**
  * Garante que o link do site em mensagens de convite/marketing leve o parâmetro ?origem=whatsapp
  * para marcar automaticamente os clientes que se cadastrarem ou agendarem pelo link.
@@ -176,15 +267,38 @@ _Te esperamos para um café especial e um atendimento diferenciado!_ ☕💈`
 
 export const evolutionApi = {
   getApiUrl() {
-    return (localStorage.getItem('evolution_api_url') || DEFAULT_API_URL).replace(/\/+$/, '');
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_url') : null;
+    return (stored || DEFAULT_API_URL).replace(/\/+$/, '');
   },
 
   getApiKey() {
-    return localStorage.getItem('evolution_api_key') || DEFAULT_API_KEY;
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_api_key') : null;
+    return stored || DEFAULT_API_KEY;
   },
 
   getInstanceName() {
-    return localStorage.getItem('evolution_instance') || DEFAULT_INSTANCE;
+    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('evolution_instance') : null;
+    return stored || DEFAULT_INSTANCE;
+  },
+
+  markInstanceDisconnected(instanceName = this.getInstanceName()) {
+    connectionStateCache.set(instanceName, { state: 'close', checkedAt: Date.now() });
+  },
+
+  async ensureInstanceConnected(instanceName = this.getInstanceName(), { force = false } = {}) {
+    const cached = connectionStateCache.get(instanceName);
+    if (!force && cached) {
+      const ttl = cached.state === 'open' ? 10000 : 5000;
+      if (Date.now() - cached.checkedAt < ttl) {
+        return { connected: cached.state === 'open', state: cached.state };
+      }
+    }
+
+    const stateRes = await this.getConnectionState(instanceName);
+    return {
+      connected: !!stateRes.success && stateRes.state === 'open',
+      state: stateRes.state
+    };
   },
 
   async request(endpoint, options = {}) {
@@ -214,12 +328,15 @@ export const evolutionApi = {
   async getConnectionState(instanceName = this.getInstanceName()) {
     try {
       const res = await this.request(`/instance/connectionState/${instanceName}`);
+      const state = res.data?.instance?.state || 'unknown';
+      connectionStateCache.set(instanceName, { state, checkedAt: Date.now() });
       return {
         success: res.ok,
-        state: res.data?.instance?.state || 'unknown',
+        state,
         raw: res.data
       };
     } catch (error) {
+      connectionStateCache.set(instanceName, { state: 'error', checkedAt: Date.now() });
       return {
         success: false,
         state: 'error',
@@ -283,11 +400,13 @@ export const evolutionApi = {
       const res = await this.request(`/instance/logout/${instanceName}`, {
         method: 'DELETE'
       });
+      this.markInstanceDisconnected(instanceName);
       return {
         success: res.ok,
         data: res.data
       };
     } catch (error) {
+      this.markInstanceDisconnected(instanceName);
       return {
         success: false,
         error: error.message
@@ -303,11 +422,13 @@ export const evolutionApi = {
       const res = await this.request(`/instance/restart/${instanceName}`, {
         method: 'POST'
       });
+      this.markInstanceDisconnected(instanceName);
       return {
         success: res.ok,
         data: res.data
       };
     } catch (error) {
+      this.markInstanceDisconnected(instanceName);
       return {
         success: false,
         error: error.message
@@ -320,24 +441,38 @@ export const evolutionApi = {
    */
   async getContacts(instanceName = this.getInstanceName()) {
     try {
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return [];
+      }
+
       const res = await this.request(`/chat/findContacts/${instanceName}`, {
         method: 'POST',
         body: JSON.stringify({})
       });
-      if (Array.isArray(res.data)) {
+
+      if (isDisconnectedApiResponse(res)) {
+        this.markInstanceDisconnected(instanceName);
+        return [];
+      }
+
+      if (res.ok && Array.isArray(res.data)) {
         return res.data
           .filter(c => !c.isGroup && c.remoteJid && c.remoteJid.includes('@s.whatsapp.net'))
           .map(c => {
             const rawPhone = (c.remoteJid || '').split('@')[0].replace(/\D/g, '');
+            const norm = normalizeAndValidatePhone(rawPhone, { hasCountryCodeHint: true });
+            if (!norm.valid) return null;
             return {
-              id: c.id || rawPhone,
+              id: c.id || norm.number,
               nome: (c.pushName || c.name || 'Lead WhatsApp').trim(),
-              telefone: rawPhone,
+              telefone: norm.number,
+              hasCountryCode: true,
               profilePicUrl: sanitizeWhatsAppAvatarUrl(c.profilePicUrl),
               origem: 'agenda_evolution'
             };
           })
-          .filter(c => c.telefone && c.telefone.length >= 8);
+          .filter(Boolean);
       }
       return [];
     } catch (error) {
@@ -347,29 +482,47 @@ export const evolutionApi = {
   },
 
   /**
-   * Valida silenciosamente (HTTP 200) se o telefone possui conta ativa no WhatsApp e resolve o JID exato
-   * (com ou sem o 9º dígito em DDDs brasileiros como MG 31..38), evitando 100% dos erros 400 Bad Request no console.
+   * Valida em modo fail-closed se a instância está conectada, se o telefone é válido e se possui conta ativa no WhatsApp
+   * (resolvendo o JID exato com ou sem 9º dígito). Caso desconectada, inválida ou sem WhatsApp, desconsidera o envio.
    */
-  async resolveValidWhatsAppNumber(number, instanceName = this.getInstanceName()) {
-    let cleanNumber = (number || '').toString().replace(/\D/g, '');
-    if (!cleanNumber || cleanNumber.length < 8) {
-      return { valid: false, number: null, error: 'Número de telefone inválido' };
-    }
-    if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
-      cleanNumber = `55${cleanNumber}`;
+  async resolveValidWhatsAppNumber(number, instanceName = this.getInstanceName(), options = {}) {
+    const norm = normalizeAndValidatePhone(number, { hasCountryCodeHint: !!options.hasCountryCodeHint });
+    if (!norm.valid) {
+      return {
+        valid: false,
+        number: null,
+        skipped: true,
+        invalidNumber: true,
+        reason: 'invalid_phone',
+        error: norm.error
+      };
     }
 
-    const cacheKey = `${instanceName}:${cleanNumber}`;
+    const conn = await this.ensureInstanceConnected(instanceName);
+    if (!conn.connected) {
+      return {
+        valid: false,
+        number: null,
+        skipped: true,
+        disconnected: true,
+        reason: 'instance_disconnected',
+        error: 'Instância WhatsApp desconectada'
+      };
+    }
+
+    const cacheKey = `${instanceName}:${norm.number}`;
     if (resolvedWhatsAppJidCache.has(cacheKey)) {
       return resolvedWhatsAppJidCache.get(cacheKey);
     }
 
-    const candidates = [cleanNumber];
+    const candidates = [norm.number];
     // Testar também variante com/sem 9º dígito para celulares brasileiros (55 + DDD + 9 + 8 dígitos <-> 55 + DDD + 8 dígitos)
-    if (cleanNumber.startsWith('55') && cleanNumber.length === 13 && cleanNumber[4] === '9') {
-      candidates.push(cleanNumber.slice(0, 4) + cleanNumber.slice(5));
-    } else if (cleanNumber.startsWith('55') && cleanNumber.length === 12) {
-      candidates.push(cleanNumber.slice(0, 4) + '9' + cleanNumber.slice(4));
+    if (norm.isBrazil) {
+      if (norm.number.length === 13 && norm.number[4] === '9') {
+        candidates.push(norm.number.slice(0, 4) + norm.number.slice(5));
+      } else if (norm.number.length === 12 && /^[6-9]$/.test(norm.number[4])) {
+        candidates.push(norm.number.slice(0, 4) + '9' + norm.number.slice(4));
+      }
     }
 
     try {
@@ -378,44 +531,109 @@ export const evolutionApi = {
         body: JSON.stringify({ numbers: candidates })
       });
 
+      if (isDisconnectedApiResponse(res)) {
+        this.markInstanceDisconnected(instanceName);
+        return {
+          valid: false,
+          number: null,
+          skipped: true,
+          disconnected: true,
+          reason: 'instance_disconnected',
+          error: 'Instância WhatsApp desconectada'
+        };
+      }
+
       if (res.ok && Array.isArray(res.data)) {
         const match = res.data.find(item => item && item.exists === true && item.jid);
         if (match) {
-          const resolvedNum = String(match.jid).split('@')[0].replace(/\D/g, '') || cleanNumber;
+          const resolvedNum = String(match.jid).split('@')[0].replace(/\D/g, '') || norm.number;
           const result = { valid: true, number: resolvedNum, jid: match.jid };
           resolvedWhatsAppJidCache.set(cacheKey, result);
           return result;
         }
-        const notFound = { valid: false, number: cleanNumber, error: 'Número não possui WhatsApp ativo' };
+        const notFound = {
+          valid: false,
+          number: norm.number,
+          skipped: true,
+          invalidNumber: true,
+          reason: 'no_whatsapp',
+          error: 'Número não possui WhatsApp ativo'
+        };
         resolvedWhatsAppJidCache.set(cacheKey, notFound);
         return notFound;
       }
-    } catch (e) {
-      // Se o endpoint de checagem oscilar, permitir tentativa direta com o número normalizado
-    }
 
-    return { valid: true, number: cleanNumber };
+      return {
+        valid: false,
+        number: null,
+        skipped: true,
+        apiError: true,
+        reason: 'validation_failed',
+        error: res?.data?.error || 'Não foi possível validar WhatsApp do número'
+      };
+    } catch (e) {
+      return {
+        valid: false,
+        number: null,
+        skipped: true,
+        apiError: true,
+        reason: 'validation_failed',
+        error: e?.message || 'Não foi possível validar WhatsApp do número'
+      };
+    }
   },
 
   /**
    * Envia presença no WhatsApp (ex: 'composing' para simular "digitando...", 'paused' para parar)
    * Essencial para a Meta registrar atividade humana antes do disparo de mensagens automáticas.
    */
-  async sendPresence(number, presence = 'composing', delay = 2500, instanceName = this.getInstanceName()) {
+  async sendPresence(number, presence = 'composing', delay = 2500, instanceName = this.getInstanceName(), options = {}) {
     try {
-      let cleanNumber = (number || '').toString().replace(/\D/g, '');
-      if (!cleanNumber) return { success: false };
-      if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
-        cleanNumber = `55${cleanNumber}`;
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return {
+          success: false,
+          skipped: true,
+          disconnected: true,
+          reason: 'instance_disconnected',
+          error: 'Instância WhatsApp desconectada'
+        };
       }
+
+      const norm = normalizeAndValidatePhone(number, {
+        hasCountryCodeHint: !!options.hasCountryCodeHint || !!options.alreadyValidated
+      });
+      if (!norm.valid) {
+        return {
+          success: false,
+          skipped: true,
+          invalidNumber: true,
+          reason: 'invalid_phone',
+          error: norm.error
+        };
+      }
+
       const res = await this.request(`/chat/sendPresence/${instanceName}`, {
         method: 'POST',
         body: JSON.stringify({
-          number: cleanNumber,
+          number: norm.number,
           presence,
           delay
         })
       });
+
+      if (isDisconnectedApiResponse(res)) {
+        this.markInstanceDisconnected(instanceName);
+        return {
+          success: false,
+          skipped: true,
+          disconnected: true,
+          reason: 'instance_disconnected',
+          data: res.data,
+          error: 'Instância WhatsApp desconectada'
+        };
+      }
+
       return { success: res.ok, data: res.data };
     } catch (e) {
       return { success: false, error: e.message };
@@ -423,24 +641,68 @@ export const evolutionApi = {
   },
 
   /**
-   * Envia mensagem de texto direta
+   * Prepara e executa disparo validado (conexão + telefone + WhatsApp ativo) compartilhado entre texto e mídia.
    */
-  async sendTextMessage(number, text, instanceName = this.getInstanceName()) {
+  async _sendValidatedPayload(endpointPath, buildPayload, number, instanceName, options = {}) {
     try {
-      let cleanNumber = (number || '').toString().replace(/\D/g, '');
-      if (!cleanNumber) throw new Error('Número de telefone inválido.');
-
-      if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
-        cleanNumber = `55${cleanNumber}`;
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return {
+          success: false,
+          skipped: true,
+          disconnected: true,
+          reason: 'instance_disconnected',
+          error: 'Instância WhatsApp desconectada'
+        };
       }
 
-      const res = await this.request(`/message/sendText/${instanceName}`, {
+      let cleanNumber = null;
+      if (!options.alreadyValidated) {
+        const check = await this.resolveValidWhatsAppNumber(number, instanceName, {
+          hasCountryCodeHint: !!options.hasCountryCodeHint
+        });
+        if (!check.valid || !check.number) {
+          return {
+            success: false,
+            skipped: true,
+            invalidNumber: !!check.invalidNumber,
+            disconnected: !!check.disconnected,
+            apiError: !!check.apiError,
+            reason: check.reason,
+            error: check.error
+          };
+        }
+        cleanNumber = check.number;
+      } else {
+        const norm = normalizeAndValidatePhone(number, { hasCountryCodeHint: true });
+        if (!norm.valid) {
+          return {
+            success: false,
+            skipped: true,
+            invalidNumber: true,
+            reason: 'invalid_phone',
+            error: norm.error
+          };
+        }
+        cleanNumber = norm.number;
+      }
+
+      const res = await this.request(`${endpointPath}/${instanceName}`, {
         method: 'POST',
-        body: JSON.stringify({
-          number: cleanNumber,
-          text: text
-        })
+        body: JSON.stringify(buildPayload(cleanNumber))
       });
+
+      if (isDisconnectedApiResponse(res)) {
+        this.markInstanceDisconnected(instanceName);
+        return {
+          success: false,
+          skipped: true,
+          disconnected: true,
+          reason: 'instance_disconnected',
+          data: res.data,
+          error: 'Instância WhatsApp desconectada'
+        };
+      }
 
       return {
         success: res.ok,
@@ -453,47 +715,44 @@ export const evolutionApi = {
         error: error.message
       };
     }
+  },
+
+  /**
+   * Envia mensagem de texto direta
+   */
+  async sendTextMessage(number, text, instanceName = this.getInstanceName(), options = {}) {
+    return this._sendValidatedPayload(
+      '/message/sendText',
+      (cleanNumber) => ({ number: cleanNumber, text }),
+      number,
+      instanceName,
+      options
+    );
   },
 
   /**
    * Envia mensagem de mídia (imagem, logotipo, documento) com legenda
    */
-  async sendMediaMessage(number, mediaUrl, caption = '', mimetype = 'image/jpeg', fileName = 'logo_demattos.jpg', instanceName = this.getInstanceName()) {
-    try {
-      let cleanNumber = (number || '').toString().replace(/\D/g, '');
-      if (!cleanNumber) throw new Error('Número de telefone inválido.');
-
-      if (cleanNumber.length <= 11 && !cleanNumber.startsWith('55')) {
-        cleanNumber = `55${cleanNumber}`;
-      }
-
-      const res = await this.request(`/message/sendMedia/${instanceName}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          number: cleanNumber,
-          mediatype: 'image',
-          mimetype,
-          caption: caption || '',
-          media: mediaUrl,
-          fileName
-        })
-      });
-
-      return {
-        success: res.ok,
-        data: res.data,
-        error: res.ok ? null : (res.data?.error || `HTTP ${res.status}`)
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message
-      };
-    }
+  async sendMediaMessage(number, mediaUrl, caption = '', mimetype = 'image/jpeg', fileName = 'logo_demattos.jpg', instanceName = this.getInstanceName(), options = {}) {
+    return this._sendValidatedPayload(
+      '/message/sendMedia',
+      (cleanNumber) => ({
+        number: cleanNumber,
+        mediatype: 'image',
+        mimetype,
+        caption: caption || '',
+        media: mediaUrl,
+        fileName
+      }),
+      number,
+      instanceName,
+      options
+    );
   },
 
   /**
    * Envio inteligente com Proteção Anti-Ban Meta e suporte a Mídia/Logo:
+   * 0. Verifica se a instância está conectada e se o número possui WhatsApp ativo (fail-closed).
    * 1. Verifica janela de horário permitido (evita denúncias de spam durante a noite).
    * 2. Simula ação humana de digitação ("composing") no WhatsApp do destinatário.
    * 3. Aplica delay humanizado com jitter aleatório para quebrar padrões repetitivos.
@@ -501,19 +760,36 @@ export const evolutionApi = {
    */
   async sendHumanizedTextMessage(number, text, settingsOverride = null, instanceName = this.getInstanceName(), options = {}) {
     try {
-      const settings = settingsOverride || await this.getWhatsAppSettings();
+      // 0a. Se instância desconectada, desconsiderar qualquer ação imediatamente
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return {
+          success: false,
+          skipped: true,
+          disconnected: true,
+          reason: 'instance_disconnected',
+          error: 'Instância WhatsApp desconectada'
+        };
+      }
 
-      // 0. Validar previamente se o número possui WhatsApp ativo (elimina 100% dos erros 400 Bad Request em sendPresence/sendMedia/sendText)
-      const checkRes = await this.resolveValidWhatsAppNumber(number, instanceName);
+      // 0b. Validar previamente telefone e conta ativa no WhatsApp (fail-closed)
+      const checkRes = await this.resolveValidWhatsAppNumber(number, instanceName, {
+        hasCountryCodeHint: !!options.hasCountryCode
+      });
       if (!checkRes.valid || !checkRes.number) {
         return {
           success: false,
-          invalidNumber: true,
           skipped: true,
-          error: checkRes.error || 'Número não possui WhatsApp ativo'
+          invalidNumber: !!checkRes.invalidNumber,
+          disconnected: !!checkRes.disconnected,
+          apiError: !!checkRes.apiError,
+          reason: checkRes.reason,
+          error: checkRes.error || 'Número inválido ou sem WhatsApp ativo'
         };
       }
       const resolvedNumber = checkRes.number;
+
+      const settings = settingsOverride || await this.getWhatsAppSettings();
 
       const finalMessageText = options.tipo === 'campanha_marketing'
         ? ensureWhatsAppTrackingLink(text)
@@ -554,7 +830,22 @@ export const evolutionApi = {
       if (settings.antiban_simular_digitando) {
         try {
           const presenceMs = isTransactionalImmediate ? 900 : 2000;
-          await this.sendPresence(resolvedNumber, 'composing', presenceMs, instanceName);
+          const presenceRes = await this.sendPresence(
+            resolvedNumber,
+            'composing',
+            presenceMs,
+            instanceName,
+            { alreadyValidated: true, hasCountryCodeHint: true }
+          );
+          if (presenceRes?.disconnected) {
+            return {
+              success: false,
+              skipped: true,
+              disconnected: true,
+              reason: 'instance_disconnected',
+              error: 'Instância WhatsApp desconectada'
+            };
+          }
           const typingWait = isTransactionalImmediate
             ? 800
             : (Math.floor(Math.random() * 1200) + 1800);
@@ -583,9 +874,10 @@ export const evolutionApi = {
             finalMessageText,
             options.mimetype || 'image/jpeg',
             options.fileName || 'logo_demattos.jpg',
-            instanceName
+            instanceName,
+            { alreadyValidated: true, hasCountryCodeHint: true }
           );
-          if (mediaRes.success) {
+          if (mediaRes.success || mediaRes.disconnected) {
             return mediaRes;
           }
           console.warn('[WhatsApp] Falha ao enviar com logo/mídia, recorrendo a texto simples:', mediaRes.error);
@@ -594,7 +886,10 @@ export const evolutionApi = {
         }
       }
 
-      return await this.sendTextMessage(resolvedNumber, finalMessageText, instanceName);
+      return await this.sendTextMessage(resolvedNumber, finalMessageText, instanceName, {
+        alreadyValidated: true,
+        hasCountryCodeHint: true
+      });
     } catch (error) {
       console.error('[Anti-Ban] Erro no envio humanizado:', error);
       return { success: false, error: error.message };
@@ -815,6 +1110,22 @@ export const evolutionApi = {
     }
   },
 
+  async _logSentNotification(telefoneCliente, mensagem, dadosExtraidos) {
+    try {
+      await supabaseAdmin.from('conversa_whatsapp').insert({
+        telefone_cliente: telefoneCliente,
+        role: 'assistant',
+        mensagem,
+        dados_extraidos: {
+          ...dadosExtraidos,
+          status: 'enviado'
+        }
+      });
+    } catch (errDb) {
+      // Ignora erro secundário de log
+    }
+  },
+
   /**
    * Dispara notificação de agendamento respeitando modo oficial vs teste e Anti-Ban
    * @param {'confirmacao'|'cancelamento'|'lembrete'|'aviso_barbeiro'|'personalizada'} tipo
@@ -823,6 +1134,12 @@ export const evolutionApi = {
    */
   async sendAppointmentNotification(tipo, agendamentoData, options = {}) {
     try {
+      const instanceName = this.getInstanceName();
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return { success: false, skipped: true, disconnected: true, reason: 'Instância WhatsApp desconectada' };
+      }
+
       const settings = await this.getWhatsAppSettings();
 
       // Se for mensagem customizada direta (acionada pelo admin), não barra por switch inativo
@@ -847,7 +1164,7 @@ export const evolutionApi = {
 
       let targetNumber = options.targetPhone || agendamentoData.cliente_telefone;
 
-      if (tipo === 'aviso_barbeiro' && !options.targetPhone) {
+      if ((tipo === 'aviso_barbeiro' || tipo === 'aviso_barbeiro_reagendamento') && !options.targetPhone) {
         targetNumber = agendamentoData.profissional_telefone || settings.numero_teste_luan || LUAN_DEFAULT_PHONE;
       }
 
@@ -858,6 +1175,11 @@ export const evolutionApi = {
         console.log(`[WhatsApp] Disparando em MODO TESTE exclusivamente para o Barbeiro Luan (${targetNumber})`);
       } else {
         console.log(`[WhatsApp] Disparando em MODO OFICIAL com Proteção Anti-Ban para (${targetNumber})`);
+      }
+
+      const targetNorm = normalizeAndValidatePhone(targetNumber);
+      if (!targetNorm.valid) {
+        return { success: false, skipped: true, invalidNumber: true, reason: 'Número de telefone inválido' };
       }
 
       // Definir mídia/logo oficial se configurada
@@ -872,28 +1194,21 @@ export const evolutionApi = {
 
       // Envio humanizado (digitando + jitter + janela de horário + logo/mídia se ativa)
       const res = await this.sendHumanizedTextMessage(
-        targetNumber,
+        targetNorm.number,
         formattedText,
         settings,
-        this.getInstanceName(),
+        instanceName,
         { mediaUrl, tipo, isImmediate: true }
       );
 
-      // Registrar histórico em conversa_whatsapp se possível
-      try {
-        await supabaseAdmin.from('conversa_whatsapp').insert({
-          telefone_cliente: targetNumber,
-          role: 'assistant',
-          mensagem: formattedText,
-          dados_extraidos: {
-            tipo,
-            agendamento_id: agendamentoData.id || null,
-            modo_operacao: settings.modo_operacao,
-            cliente_original: agendamentoData.cliente_nome
-          }
+      // Registrar histórico em conversa_whatsapp somente quando o envio foi efetivamente concluído
+      if (res && res.success) {
+        await this._logSentNotification(targetNorm.number, formattedText, {
+          tipo,
+          agendamento_id: agendamentoData.id || null,
+          modo_operacao: settings.modo_operacao,
+          cliente_original: agendamentoData.cliente_nome
         });
-      } catch (errDb) {
-        // Ignora erro de gravação secundária
       }
 
       return res;
@@ -910,6 +1225,12 @@ export const evolutionApi = {
    */
   async notifyBarberNewAppointment(agendamentoData, profissionalTelefone = null) {
     try {
+      const instanceName = this.getInstanceName();
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return { success: false, skipped: true, disconnected: true, reason: 'Instância WhatsApp desconectada' };
+      }
+
       const settings = await this.getWhatsAppSettings();
       if (!settings.notificar_barbeiro_ativo) {
         return { skipped: true, reason: 'Notificação ao barbeiro desativada' };
@@ -928,33 +1249,31 @@ export const evolutionApi = {
         console.log(`[WhatsApp] Disparando aviso ao barbeiro em MODO OFICIAL para (${targetNumber})`);
       }
 
+      const targetNorm = normalizeAndValidatePhone(targetNumber);
+      if (!targetNorm.valid) {
+        return { success: false, skipped: true, invalidNumber: true, reason: 'Número de telefone inválido' };
+      }
+
       let mediaUrl = null;
       if (settings.whatsapp_incluir_logo && settings.whatsapp_logo_em_aviso_barbeiro) {
         mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
       }
 
       const res = await this.sendHumanizedTextMessage(
-        targetNumber,
+        targetNorm.number,
         formattedText,
         settings,
-        this.getInstanceName(),
+        instanceName,
         { mediaUrl, tipo: 'aviso_barbeiro_novo', isImmediate: true }
       );
 
-      try {
-        await supabaseAdmin.from('conversa_whatsapp').insert({
-          telefone_cliente: targetNumber,
-          role: 'assistant',
-          mensagem: formattedText,
-          dados_extraidos: {
-            tipo: 'aviso_barbeiro_novo',
-            agendamento_id: agendamentoData.id || null,
-            modo_operacao: settings.modo_operacao,
-            cliente_nome: agendamentoData.cliente_nome
-          }
+      if (res && res.success) {
+        await this._logSentNotification(targetNorm.number, formattedText, {
+          tipo: 'aviso_barbeiro_novo',
+          agendamento_id: agendamentoData.id || null,
+          modo_operacao: settings.modo_operacao,
+          cliente_nome: agendamentoData.cliente_nome
         });
-      } catch (errDb) {
-        // Ignora erro secundário
       }
 
       return res;
@@ -971,6 +1290,12 @@ export const evolutionApi = {
    */
   async notifyBarberCancellation(agendamentoData, profissionalTelefone = null) {
     try {
+      const instanceName = this.getInstanceName();
+      const conn = await this.ensureInstanceConnected(instanceName);
+      if (!conn.connected) {
+        return { success: false, skipped: true, disconnected: true, reason: 'Instância WhatsApp desconectada' };
+      }
+
       const settings = await this.getWhatsAppSettings();
       if (!settings.notificar_barbeiro_ativo) {
         return { skipped: true, reason: 'Notificação ao barbeiro desativada' };
@@ -986,33 +1311,31 @@ export const evolutionApi = {
         formattedText = `🧪 *[MODO DE TESTE - CANCELAMENTO AO BARBEIRO]*\n\n${formattedText}`;
       }
 
+      const targetNorm = normalizeAndValidatePhone(targetNumber);
+      if (!targetNorm.valid) {
+        return { success: false, skipped: true, invalidNumber: true, reason: 'Número de telefone inválido' };
+      }
+
       let mediaUrl = null;
       if (settings.whatsapp_incluir_logo && settings.whatsapp_logo_em_aviso_barbeiro) {
         mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
       }
 
       const res = await this.sendHumanizedTextMessage(
-        targetNumber,
+        targetNorm.number,
         formattedText,
         settings,
-        this.getInstanceName(),
+        instanceName,
         { mediaUrl, tipo: 'aviso_barbeiro_cancelamento', isImmediate: true }
       );
 
-      try {
-        await supabaseAdmin.from('conversa_whatsapp').insert({
-          telefone_cliente: targetNumber,
-          role: 'assistant',
-          mensagem: formattedText,
-          dados_extraidos: {
-            tipo: 'aviso_barbeiro_cancelamento',
-            agendamento_id: agendamentoData.id || null,
-            modo_operacao: settings.modo_operacao,
-            cliente_nome: agendamentoData.cliente_nome
-          }
+      if (res && res.success) {
+        await this._logSentNotification(targetNorm.number, formattedText, {
+          tipo: 'aviso_barbeiro_cancelamento',
+          agendamento_id: agendamentoData.id || null,
+          modo_operacao: settings.modo_operacao,
+          cliente_nome: agendamentoData.cliente_nome
         });
-      } catch (errDb) {
-        // Ignora erro secundário
       }
 
       return res;

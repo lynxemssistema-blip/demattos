@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import AdminRoute from '@/components/auth/AdminRoute';
 import { createPageUrl } from '@/utils';
-import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL, sanitizeWhatsAppAvatarUrl, ensureWhatsAppTrackingLink } from '@/api/evolutionClient';
+import { evolutionApi, DEFAULT_TEMPLATES, LUAN_DEFAULT_PHONE, DEFAULT_LOGO_URL, sanitizeWhatsAppAvatarUrl, ensureWhatsAppTrackingLink, normalizeAndValidatePhone } from '@/api/evolutionClient';
 import { getBrazilDateString, parseBrazilDateTimeMs } from '@/lib/brazilTime';
 import { isBrazilianMaleContactName, extractCleanFirstName } from '@/lib/brazilianMaleNames';
 import { Button } from '@/components/ui/button';
@@ -25,14 +25,11 @@ import {
   Smartphone,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   RotateCw,
   Send,
   LogOut,
   Power,
   ShieldCheck,
-  ShieldAlert,
-  Shield,
   PhoneCall,
   Loader2,
   ExternalLink,
@@ -41,13 +38,8 @@ import {
   Sparkles,
   Save,
   Calendar,
-  Info,
-  Server,
-  Hash,
   Bell,
-  Sliders,
   Shuffle,
-  Sun,
   Moon,
   Zap,
   Check,
@@ -145,7 +137,7 @@ function AdminWhatsAppContent() {
   const [contactsVisibleLimit, setContactsVisibleLimit] = useState(60);
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [campaignRunning, setCampaignRunning] = useState(false);
-  const [campaignProgress, setCampaignProgress] = useState({ total: 0, current: 0, sent: 0, failed: 0, nextCountdown: 0, currentContact: '' });
+  const [campaignProgress, setCampaignProgress] = useState({ total: 0, current: 0, sent: 0, skipped: 0, failed: 0, nextCountdown: 0, currentContact: '' });
   const [campaignLogs, setCampaignLogs] = useState([]);
   const campaignStopRef = useRef(false);
 
@@ -254,6 +246,7 @@ function AdminWhatsAppContent() {
       (resMsgs24h.data || []).forEach(m => {
         const extra = m.dados_extraidos || {};
         if (extra.modo_operacao === 'teste' || extra.is_teste === true) return;
+        if (extra.status === 'erro' || extra.status === 'sem_whatsapp' || extra.status === 'desconsiderado') return;
         const raw = (m.telefone_cliente || '').replace(/\D/g, '');
         if (raw.length >= 8) {
           const key = raw.slice(-8);
@@ -273,79 +266,80 @@ function AdminWhatsAppContent() {
       const appMap = new Map();
 
       (resCli.data || []).forEach(c => {
-        const raw = (c.telefone || '').replace(/\D/g, '');
-        if (raw.length >= 8) {
-          const key = raw.slice(-8);
-          appSet.add(key);
-          const nomeLimpo = (c.nome || '').trim();
-          // Contagem e convite da Barbearia aplicam SOMENTE para nomes masculinos (ou quem já converteu pelo link se masculino)
-          if (isBrazilianMaleContactName(nomeLimpo)) {
-            appMap.set(key, {
-              id: c.id || key,
-              nome: nomeLimpo,
-              telefone: raw,
-              ultima_data: null,
-              tipo: 'cliente_app',
-              origem: c.cadastrado_via_whatsapp ? 'Link Convite WhatsApp' : 'Cadastro do App',
-              cadastradoViaWhatsApp: !!c.cadastrado_via_whatsapp,
-              enviado24h: sent24hMap.has(key),
-              ultimoEnvio24h: sent24hMap.get(key) || null
-            });
-          }
+        const norm = normalizeAndValidatePhone(c.telefone);
+        if (!norm.valid) return;
+        const raw = norm.number;
+        const key = raw.slice(-8);
+        appSet.add(key);
+        const nomeLimpo = (c.nome || '').trim();
+        // Contagem e convite da Barbearia aplicam SOMENTE para nomes masculinos (ou quem já converteu pelo link se masculino)
+        if (isBrazilianMaleContactName(nomeLimpo)) {
+          appMap.set(key, {
+            id: c.id || key,
+            nome: nomeLimpo,
+            telefone: raw,
+            ultima_data: null,
+            tipo: 'cliente_app',
+            origem: c.cadastrado_via_whatsapp ? 'Link Convite WhatsApp' : 'Cadastro do App',
+            cadastradoViaWhatsApp: !!c.cadastrado_via_whatsapp,
+            enviado24h: sent24hMap.has(key),
+            ultimoEnvio24h: sent24hMap.get(key) || null
+          });
         }
       });
 
       (resAg.data || []).forEach(a => {
-        const raw = (a.cliente_telefone || '').replace(/\D/g, '');
-        if (raw.length >= 8) {
-          const key = raw.slice(-8);
-          appSet.add(key);
-          const nomeLimpo = (a.cliente_nome || '').trim();
-          const existing = appMap.get(key);
-          if (existing) {
-            if (!existing.ultima_data || (a.data && a.data > existing.ultima_data)) {
-              existing.ultima_data = a.data;
-            }
-            appMap.set(key, existing);
-          } else if (isBrazilianMaleContactName(nomeLimpo)) {
-            appMap.set(key, {
-              id: key,
-              nome: nomeLimpo,
-              telefone: raw,
-              ultima_data: a.data || null,
-              tipo: 'cliente_app',
-              origem: 'Agendamento App',
-              cadastradoViaWhatsApp: false,
-              enviado24h: sent24hMap.has(key),
-              ultimoEnvio24h: sent24hMap.get(key) || null
-            });
+        const norm = normalizeAndValidatePhone(a.cliente_telefone);
+        if (!norm.valid) return;
+        const raw = norm.number;
+        const key = raw.slice(-8);
+        appSet.add(key);
+        const nomeLimpo = (a.cliente_nome || '').trim();
+        const existing = appMap.get(key);
+        if (existing) {
+          if (!existing.ultima_data || (a.data && a.data > existing.ultima_data)) {
+            existing.ultima_data = a.data;
           }
+          appMap.set(key, existing);
+        } else if (isBrazilianMaleContactName(nomeLimpo)) {
+          appMap.set(key, {
+            id: key,
+            nome: nomeLimpo,
+            telefone: raw,
+            ultima_data: a.data || null,
+            tipo: 'cliente_app',
+            origem: 'Agendamento App',
+            cadastradoViaWhatsApp: false,
+            enviado24h: sent24hMap.has(key),
+            ultimoEnvio24h: sent24hMap.get(key) || null
+          });
         }
       });
 
       const leads = [];
       const seenLeadKeys = new Set();
       (evoContacts || []).forEach(c => {
-        const raw = (c.telefone || '').replace(/\D/g, '');
-        if (raw.length >= 8) {
-          const key = raw.slice(-8);
-          const nomeLimpo = (c.nome || '').trim();
-          // Somente nomes masculinos e sem duplicidade
-          if (!appSet.has(key) && !seenLeadKeys.has(key) && isBrazilianMaleContactName(nomeLimpo)) {
-            seenLeadKeys.add(key);
-            leads.push({
-              id: c.id || raw,
-              nome: nomeLimpo,
-              telefone: raw,
-              profilePicUrl: c.profilePicUrl || null,
-              ultima_data: null,
-              tipo: 'lead_agenda',
-              origem: 'Agenda Telefônica Evolution',
-              cadastradoViaWhatsApp: false,
-              enviado24h: sent24hMap.has(key),
-              ultimoEnvio24h: sent24hMap.get(key) || null
-            });
-          }
+        const norm = normalizeAndValidatePhone(c.telefone, { hasCountryCodeHint: true });
+        if (!norm.valid) return;
+        const raw = norm.number;
+        const key = raw.slice(-8);
+        const nomeLimpo = (c.nome || '').trim();
+        // Somente nomes masculinos e sem duplicidade
+        if (!appSet.has(key) && !seenLeadKeys.has(key) && isBrazilianMaleContactName(nomeLimpo)) {
+          seenLeadKeys.add(key);
+          leads.push({
+            id: c.id || raw,
+            nome: nomeLimpo,
+            telefone: raw,
+            hasCountryCode: true,
+            profilePicUrl: c.profilePicUrl || null,
+            ultima_data: null,
+            tipo: 'lead_agenda',
+            origem: 'Agenda Telefônica Evolution',
+            cadastradoViaWhatsApp: false,
+            enviado24h: sent24hMap.has(key),
+            ultimoEnvio24h: sent24hMap.get(key) || null
+          });
         }
       });
 
@@ -401,6 +395,7 @@ function AdminWhatsAppContent() {
           setInstanceDetails(detailsRes.instance);
         }
         setQrCodeBase64(null);
+        loadClientesForMarketing();
       }
 
       setConnectionState(newState);
@@ -576,6 +571,19 @@ function AdminWhatsAppContent() {
     }
   };
 
+  const notifyTestSendFailure = (res, fallbackErrorPrefix = 'Falha no envio da mensagem: ') => {
+    if (res?.disconnected) {
+      setConnectionState('close');
+      toast.warning('WhatsApp desconectado. Envio desconsiderado.');
+      return;
+    }
+    if (res?.invalidNumber || res?.skipped) {
+      toast.info('Envio desconsiderado: ' + (res?.error || res?.reason || 'telefone inválido ou sem WhatsApp ativo'));
+      return;
+    }
+    toast.error(fallbackErrorPrefix + (res?.error || res?.reason || 'Falha no disparo'));
+  };
+
   const handleSendTemplateTest = async (tipo) => {
     if (connectionState !== 'open') {
       toast.warning('O WhatsApp precisa estar conectado para disparar mensagens de teste.');
@@ -612,19 +620,18 @@ function AdminWhatsAppContent() {
         mediaUrl = settings.whatsapp_logo_url || DEFAULT_LOGO_URL;
       }
       const res = await evolutionApi.sendHumanizedTextMessage(targetNumber, text, settings, evolutionApi.getInstanceName(), { mediaUrl, isImmediate: true });
-      await registrarEnvioNoBanco({
-        telefone: targetNumber,
-        mensagem: text,
-        tipo: `teste_${tipo}`,
-        status: res.success ? 'enviado' : 'erro',
-        clienteNome: 'Teste Manual',
-        isTeste: true,
-        detalhe: res.error || ''
-      });
       if (res.success) {
+        await registrarEnvioNoBanco({
+          telefone: targetNumber,
+          mensagem: text,
+          tipo: `teste_${tipo}`,
+          status: 'enviado',
+          clienteNome: 'Teste Manual',
+          isTeste: true
+        });
         toast.success(`Mensagem de teste enviada com sucesso para ${targetNumber}!`);
       } else {
-        toast.error('Falha no envio da mensagem: ' + (res.error || res.reason || 'Verifique o número'));
+        notifyTestSendFailure(res, 'Falha no envio da mensagem: ');
       }
     } catch (e) {
       toast.error('Erro ao enviar teste: ' + e.message);
@@ -668,7 +675,7 @@ function AdminWhatsAppContent() {
         toast.success(`Mensagem com a logo oficial enviada para ${targetNumber}!`);
         confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
       } else {
-        toast.error('Falha no envio com logo: ' + (res.error || 'Erro desconhecido'));
+        notifyTestSendFailure(res, 'Falha no envio com logo: ');
       }
     } catch (err) {
       toast.error('Erro no envio: ' + err.message);
@@ -837,7 +844,7 @@ function AdminWhatsAppContent() {
         toast.success(`Mensagem de marketing enviada com sucesso para ${targetNumber}!`);
         confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
       } else {
-        toast.error('Erro ao enviar teste: ' + (res.error || res.reason || 'Falha no disparo'));
+        notifyTestSendFailure(res, 'Erro ao enviar teste: ');
       }
     } catch (e) {
       toast.error('Erro: ' + e.message);
@@ -855,6 +862,13 @@ function AdminWhatsAppContent() {
     const targets = getFilteredClients();
     if (targets.length === 0) {
       toast.error('Nenhum cliente elegível para este segmento selecionado.');
+      return;
+    }
+
+    const conn = await evolutionApi.ensureInstanceConnected(evolutionApi.getInstanceName(), { force: true });
+    if (!conn.connected) {
+      setConnectionState(conn.state);
+      toast.warning('WhatsApp desconectado. Campanha desconsiderada.');
       return;
     }
 
@@ -877,6 +891,7 @@ function AdminWhatsAppContent() {
         (recentRows || []).forEach(r => {
           const ex = r.dados_extraidos || {};
           if (ex.modo_operacao === 'teste' || ex.is_teste === true) return;
+          if (ex.status === 'erro' || ex.status === 'sem_whatsapp' || ex.status === 'desconsiderado') return;
           const rk = String(r.telefone_cliente || '').replace(/\D/g, '').slice(-8);
           if (rk.length === 8) liveBlockedKeys.add(rk);
         });
@@ -884,11 +899,13 @@ function AdminWhatsAppContent() {
     }
 
     campaignStopRef.current = false;
+    let abortedByDisconnect = false;
     setCampaignRunning(true);
     setCampaignProgress({
       total: targets.length,
       current: 0,
       sent: 0,
+      skipped: 0,
       failed: 0,
       nextCountdown: 0,
       currentContact: ''
@@ -960,7 +977,12 @@ function AdminWhatsAppContent() {
           formattedText,
           settings,
           evolutionApi.getInstanceName(),
-          { mediaUrl, tipo: 'campanha_marketing', isImmediate: true }
+          {
+            mediaUrl,
+            tipo: 'campanha_marketing',
+            isImmediate: true,
+            hasCountryCode: !isTest && !!client.hasCountryCode
+          }
         );
 
         if (res.success) {
@@ -989,13 +1011,38 @@ function AdminWhatsAppContent() {
             segmento: marketingSegment,
             isTeste: isTest
           });
+        } else if (res.disconnected) {
+          abortedByDisconnect = true;
+          shouldWaitAntiBan = false;
+          setConnectionState('close');
+          setCampaignLogs(prev => [
+            {
+              id: Date.now() + Math.random(),
+              cliente: client.nome,
+              telefone: targetNumber,
+              hora: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+              status: 'desconectado',
+              detalhe: 'WhatsApp desconectado — campanha interrompida'
+            },
+            ...prev
+          ]);
+          toast.warning('Instância do WhatsApp desconectada. Disparos restantes foram desconsiderados.');
+          break;
+        } else if (res.invalidNumber || res.skipped) {
+          shouldWaitAntiBan = false;
+          setCampaignProgress(prev => ({ ...prev, skipped: (prev.skipped || 0) + 1 }));
+          setCampaignLogs(prev => [
+            {
+              id: Date.now() + Math.random(),
+              cliente: client.nome,
+              telefone: targetNumber,
+              hora: new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+              status: 'desconsiderado',
+              detalhe: res.error || res.reason || 'Sem telefone válido ou sem WhatsApp ativo'
+            },
+            ...prev
+          ]);
         } else {
-          if (res.invalidNumber) {
-            shouldWaitAntiBan = false; // Número sem WhatsApp não precisa aguardar intervalo de 25s
-            if (!isTest && clientPhoneKey.length === 8) {
-              liveBlockedKeys.add(clientPhoneKey);
-            }
-          }
           setCampaignProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
           const motivoFalha = res.error || res.reason || 'Falha no envio';
           setCampaignLogs(prev => [
@@ -1009,24 +1056,13 @@ function AdminWhatsAppContent() {
             },
             ...prev
           ]);
-
-          await registrarEnvioNoBanco({
-            telefone: targetNumber,
-            mensagem: formattedText,
-            tipo: 'campanha_marketing',
-            status: res.invalidNumber ? 'sem_whatsapp' : 'erro',
-            clienteNome: client.nome,
-            segmento: marketingSegment,
-            isTeste: isTest,
-            detalhe: motivoFalha
-          });
         }
       } catch (err) {
         setCampaignProgress(prev => ({ ...prev, failed: prev.failed + 1 }));
       }
 
       // Intervalo de segurança Anti-Ban (apenas quando houve tentativa real no WhatsApp)
-      if (shouldWaitAntiBan && i < targets.length - 1 && !campaignStopRef.current) {
+      if (shouldWaitAntiBan && i < targets.length - 1 && !campaignStopRef.current && !abortedByDisconnect) {
         const delaySec = isTest ? 3 : Math.floor(Math.random() * 12) + 20; // 20s a 32s
         for (let cd = delaySec; cd > 0; cd--) {
           if (campaignStopRef.current) break;
@@ -1038,7 +1074,7 @@ function AdminWhatsAppContent() {
     }
 
     setCampaignRunning(false);
-    if (!campaignStopRef.current) {
+    if (!campaignStopRef.current && !abortedByDisconnect) {
       toast.success('🎉 Campanha concluída com sucesso!');
       try {
         confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
@@ -2466,19 +2502,32 @@ function AdminWhatsAppContent() {
                       <div className="space-y-1.5 pt-2 border-t border-[#222]">
                         <span className="text-[11px] text-gray-400 font-semibold block">Relatório dos Últimos Disparos:</span>
                         <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                          {campaignLogs.map(log => (
-                            <div
-                              key={log.id}
-                              className="p-2 rounded bg-black/50 border border-[#222] flex items-center justify-between text-[11px]"
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <span className={`w-2 h-2 rounded-full ${log.status === 'sucesso' ? 'bg-[#25D366]' : 'bg-red-500'}`} />
-                                <span className="text-white font-medium">{log.cliente}</span>
-                                <span className="text-gray-400 font-mono">({log.telefone})</span>
+                          {campaignLogs.map(log => {
+                            const dotColor =
+                              log.status === 'sucesso'
+                                ? 'bg-[#25D366]'
+                                : (log.status === 'desconsiderado' || log.status === 'ignorado_24h')
+                                  ? 'bg-gray-500'
+                                  : 'bg-red-500';
+                            return (
+                              <div
+                                key={log.id}
+                                className="p-2 rounded bg-black/50 border border-[#222] flex items-center justify-between gap-2 text-[11px]"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+                                    <span className="text-white font-medium truncate">{log.cliente}</span>
+                                    <span className="text-gray-400 font-mono">({log.telefone})</span>
+                                  </div>
+                                  {log.status !== 'sucesso' && log.detalhe && (
+                                    <p className="text-[10px] text-gray-400 truncate pl-3.5">{log.detalhe}</p>
+                                  )}
+                                </div>
+                                <span className="text-gray-400 font-mono text-[10px] shrink-0">{log.hora}</span>
                               </div>
-                              <span className="text-gray-400 font-mono text-[10px]">{log.hora}</span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -2685,7 +2734,11 @@ function AdminWhatsAppContent() {
                           {/* Coluna Direita: Ações */}
                           <div className="flex items-center gap-2 shrink-0">
                             <a
-                              href={`https://wa.me/55${c.telefone.slice(-11)}`}
+                              href={
+                                c.hasCountryCode
+                                  ? `https://wa.me/${c.telefone}`
+                                  : `https://wa.me/${normalizeAndValidatePhone(c.telefone).number || `55${c.telefone.slice(-11)}`}`
+                              }
                               target="_blank"
                               rel="noreferrer"
                               className="px-2.5 py-1.5 bg-[#25D366]/10 hover:bg-[#25D366]/20 border border-[#25D366]/30 text-[#25D366] rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors"
